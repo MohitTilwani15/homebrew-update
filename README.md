@@ -16,7 +16,7 @@ brew upgrade --formula ...
 brew upgrade --cask ...
 ```
 
-When multiple packages are outdated, use **Update One Package** to choose a specific formula or cask. Each item shows the package name and version change in the menu, while the main status still stays count-based.
+When multiple packages are outdated, use **Update One Package** to choose a specific formula or cask. Each item shows the package name and version change in the menu. Single-package updates show the selected package name while they run; update-all progress stays count-based.
 
 The update menu also shows a **Stop Update** item while Homebrew is running. Choosing it sends an interrupt to the active `brew` process, then terminates it if it is still running after a short grace period.
 

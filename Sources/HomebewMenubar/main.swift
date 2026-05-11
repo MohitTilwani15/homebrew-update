@@ -78,21 +78,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshAndUpgrade() {
         guard !isUpdating else { return }
-        beginUpdate(packages: lastOutdatedPackages)
+        beginUpdate(packages: lastOutdatedPackages, showsPackageNames: false)
     }
 
     @objc private func updateSpecificPackage(_ sender: NSMenuItem) {
         guard !isUpdating else { return }
         guard let package = packageByMenuTag[sender.tag] else { return }
-        beginUpdate(packages: [package])
+        beginUpdate(packages: [package], showsPackageNames: true)
     }
 
-    private func beginUpdate(packages: [BrewPackage]) {
+    private func beginUpdate(packages: [BrewPackage], showsPackageNames: Bool) {
         isUpdating = true
         latestProgress = UpdateProgress(percent: 0, message: "Starting update...")
         render(.updating(latestProgress))
 
-        activeOperation = checker.updatePackages(packages: packages) { [weak self] progress in
+        activeOperation = checker.updatePackages(packages: packages, showsPackageNames: showsPackageNames) { [weak self] progress in
             DispatchQueue.main.async {
                 guard let self, self.isUpdating else { return }
                 self.latestProgress = progress
@@ -439,11 +439,13 @@ private final class BrewPackageService {
 
     func updatePackages(
         packages: [BrewPackage],
+        showsPackageNames: Bool,
         onProgress: @escaping (UpdateProgress) -> Void,
         completion: @escaping (Result<Void, Error>) -> Void
     ) -> BrewUpdateOperation {
         let operation = BrewUpdateOperation(
             packages: packages,
+            showsPackageNames: showsPackageNames,
             runner: self,
             onProgress: onProgress,
             completion: completion
@@ -619,6 +621,7 @@ private final class BrewPackageService {
 
 private final class BrewUpdateOperation {
     private var packages: [BrewPackage]
+    private let showsPackageNames: Bool
     private let runner: BrewPackageService
     private let onProgress: (UpdateProgress) -> Void
     private let completion: (Result<Void, Error>) -> Void
@@ -635,11 +638,13 @@ private final class BrewUpdateOperation {
 
     init(
         packages: [BrewPackage],
+        showsPackageNames: Bool,
         runner: BrewPackageService,
         onProgress: @escaping (UpdateProgress) -> Void,
         completion: @escaping (Result<Void, Error>) -> Void
     ) {
         self.packages = packages
+        self.showsPackageNames = showsPackageNames
         self.runner = runner
         self.onProgress = onProgress
         self.completion = completion
@@ -719,6 +724,10 @@ private final class BrewUpdateOperation {
     }
 
     private func updateCountMessage(completed: Int) -> String {
+        if showsPackageNames, let package = packages.first {
+            return completed > 0 ? "Updated \(package.name)" : "Updating \(package.name)"
+        }
+
         let total = packageProgressDenominator()
         if total == 1 {
             return completed > 0 ? "Updated 1 package" : "Updating 1 package"
