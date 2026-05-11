@@ -45,6 +45,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <true/>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Homebew Menubar opens Terminal when Homebrew needs your password to finish an update.</string>
 </dict>
 </plist>
 PLIST
