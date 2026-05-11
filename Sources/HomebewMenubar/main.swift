@@ -19,7 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var specificUpdateItem: NSMenuItem!
     private var stopItem: NSMenuItem!
     private var terminalItem: NSMenuItem!
+    private var cheersSoundItem: NSMenuItem!
     private var checkTimer: Timer?
+    private var cheersTimer: Timer?
     private var isUpdating = false
     private var activeOperation: BrewUpdateOperation?
     private var latestProgress = UpdateProgress(percent: 0, message: "Starting update...")
@@ -27,6 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var packageByMenuTag: [Int: BrewPackage] = [:]
     private var nextPackageMenuTag = 1_000
     private var terminalCommand: String?
+    private var celebrateAfterNextCurrentCheck = false
+    private var playsCheersSound: Bool {
+        get { UserDefaults.standard.bool(forKey: "playsCheersSound") }
+        set { UserDefaults.standard.set(newValue, forKey: "playsCheersSound") }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -53,6 +60,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         terminalItem.image = MenuIcon.terminal
         terminalItem.isHidden = true
         terminalItem.isEnabled = false
+        cheersSoundItem = NSMenuItem(title: "Play Cheers Sound", action: #selector(toggleCheersSound), keyEquivalent: "")
+        cheersSoundItem.target = self
+        cheersSoundItem.image = MenuIcon.sound
+        cheersSoundItem.state = playsCheersSound ? .on : .off
 
         let menu = NSMenu()
         menu.addItem(packageItem)
@@ -61,6 +72,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(specificUpdateItem)
         menu.addItem(stopItem)
         menu.addItem(terminalItem)
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(cheersSoundItem)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
 
@@ -73,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         checkTimer?.invalidate()
+        cheersTimer?.invalidate()
         activeOperation?.cancel()
     }
 
@@ -106,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 switch result {
                 case .success:
+                    self.celebrateAfterNextCurrentCheck = true
                     self.checkForOutdatedPackages()
                 case .failure(let error):
                     if (error as? BrewError) == .canceled {
@@ -133,6 +148,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TerminalLauncher.open(command: terminalCommand)
     }
 
+    @objc private func toggleCheersSound() {
+        playsCheersSound.toggle()
+        cheersSoundItem.state = playsCheersSound ? .on : .off
+    }
+
     private func checkForOutdatedPackages() {
         guard !isUpdating else { return }
 
@@ -146,10 +166,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.lastOutdatedPackages = packages
                     if packages.isEmpty {
                         self.render(.current)
+                        if self.celebrateAfterNextCurrentCheck {
+                            self.celebrateAfterNextCurrentCheck = false
+                            self.startCheersAnimation()
+                        }
                     } else {
+                        self.celebrateAfterNextCurrentCheck = false
                         self.render(.outdated(packages))
                     }
                 case .failure(let error):
+                    self.celebrateAfterNextCurrentCheck = false
                     if (error as? BrewError) == .missingExecutable {
                         self.render(.brewMissing)
                     } else {
@@ -157,6 +183,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
             }
+        }
+    }
+
+    private func startCheersAnimation() {
+        cheersTimer?.invalidate()
+        if playsCheersSound {
+            NSSound(named: NSSound.Name("Glass"))?.play()
+        }
+
+        let frames: [CGFloat] = [0.18, 0.38, 0.62, 0.84, 1.0, 0.88, 0.96, 0.9]
+        var frameIndex = 0
+        packageItem.title = "All caught up. Cheers!"
+
+        cheersTimer = Timer.scheduledTimer(withTimeInterval: 0.09, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+
+            guard frameIndex < frames.count else {
+                timer.invalidate()
+                self.cheersTimer = nil
+                self.render(.current)
+                return
+            }
+
+            self.statusItem.button?.image = BeerIcon.image(fillLevel: frames[frameIndex])
+            frameIndex += 1
         }
     }
 
@@ -760,6 +814,7 @@ private enum MenuIcon {
     static let cask = symbol("app")
     static let stop = symbol("stop.circle")
     static let terminal = symbol("terminal")
+    static let sound = symbol("speaker.wave.2")
 
     private static func symbol(_ name: String) -> NSImage? {
         let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)

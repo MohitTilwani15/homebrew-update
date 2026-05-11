@@ -20,9 +20,11 @@ When multiple packages are outdated, use **Update One Package** to choose a spec
 
 The update menu also shows a **Stop Update** item while Homebrew is running. Choosing it sends an interrupt to the active `brew` process, then terminates it if it is still running after a short grace period.
 
+When an update leaves everything current, the beer icon plays a quick cheers animation. Enable **Play Cheers Sound** if you also want a subtle glass sound on successful updates.
+
 Some casks uninstall or replace files with `sudo`, which requires an interactive password prompt. In that case the app shows **Open Terminal to Finish** so Homebrew can ask for your password in Terminal. When Terminal finishes, return to the app and choose **Refresh**.
 
-When the update finishes, the app checks `brew outdated --quiet` again and returns the icon to full when everything is current.
+When the update finishes, the app checks `brew outdated --json=v2` again and returns the icon to full when everything is current.
 
 ## Build
 
