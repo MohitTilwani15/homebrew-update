@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var specificUpdateItem: NSMenuItem!
     private var stopItem: NSMenuItem!
     private var terminalItem: NSMenuItem!
+    private var settingsItem: NSMenuItem!
     private var autoUpdateItem: NSMenuItem!
     private var launchAtLoginItem: NSMenuItem!
     private var updateFrequencyItem: NSMenuItem!
@@ -36,6 +37,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var checkTimer: Timer?
     private var brewDoctorTimer: Timer?
     private var cheersTimer: Timer?
+    private var settingsWindow: NSWindow?
+    private var settingsAutoUpdateButton: NSButton?
+    private var settingsLaunchAtLoginButton: NSButton?
+    private var settingsQuietHoursButton: NSButton?
+    private var settingsCleanupButton: NSButton?
+    private var settingsNotificationsButton: NSButton?
+    private var settingsCheersSoundButton: NSButton?
+    private var settingsFrequencyPopUp: NSPopUpButton?
+    private var settingsIgnoredPopUp: NSPopUpButton?
+    private var settingsUnignoreButton: NSButton?
     private var isUpdating = false
     private var activeOperation: BrewUpdateOperation?
     private var latestProgress = UpdateProgress(percent: 0, message: "Starting update...")
@@ -111,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "sendsNotifications": true
         ])
         NSApp.setActivationPolicy(.accessory)
+        setupApplicationMenu()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.imagePosition = .imageOnly
@@ -134,6 +146,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         terminalItem.image = MenuIcon.terminal
         terminalItem.isHidden = true
         terminalItem.isEnabled = false
+        settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        settingsItem.image = MenuIcon.settings
         autoUpdateItem = NSMenuItem(title: "Auto Update in Background", action: #selector(toggleAutomaticUpdates), keyEquivalent: "")
         autoUpdateItem.target = self
         autoUpdateItem.image = MenuIcon.automaticUpdate
@@ -189,14 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(historyItem)
         menu.addItem(doctorItem)
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(autoUpdateItem)
-        menu.addItem(launchAtLoginItem)
-        menu.addItem(updateFrequencyItem)
-        menu.addItem(quietHoursItem)
-        menu.addItem(cleanupItem)
-        menu.addItem(notificationsItem)
-        menu.addItem(cheersSoundItem)
-        menu.addItem(ignoredPackagesItem)
+        menu.addItem(settingsItem)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
 
@@ -206,6 +214,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleBrewDoctorTimer()
         requestNotificationPermissionIfNeeded()
         checkBrewDoctor()
+    }
+
+    private func setupApplicationMenu() {
+        let mainMenu = NSMenu()
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenuItem.submenu = appMenu
+
+        let settingsMenuItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+        settingsMenuItem.target = self
+        appMenu.addItem(settingsMenuItem)
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(NSMenuItem(title: "Quit Homebew Menubar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+
+        mainMenu.addItem(appMenuItem)
+        NSApp.mainMenu = mainMenu
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -282,9 +306,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TerminalLauncher.open(command: terminalCommand)
     }
 
+    @objc private func openSettings() {
+        if settingsWindow == nil {
+            settingsWindow = makeSettingsWindow()
+        }
+
+        refreshSettingsControls()
+        settingsWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     @objc private func toggleCheersSound() {
         playsCheersSound.toggle()
         cheersSoundItem.state = playsCheersSound ? .on : .off
+        refreshSettingsControls()
     }
 
     @objc private func toggleAutomaticUpdates() {
@@ -294,6 +329,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if automaticallyUpdatesPackages, !isUpdating {
             checkForOutdatedPackages()
         }
+        refreshSettingsControls()
     }
 
     @objc private func toggleLaunchAtLogin() {
@@ -307,6 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             render(.failed("Could not update Launch at Login: \(error.localizedDescription)"))
         }
         launchAtLoginItem.state = launchAtLoginEnabled ? .on : .off
+        refreshSettingsControls()
     }
 
     @objc private func selectUpdateFrequency(_ sender: NSMenuItem) {
@@ -314,22 +351,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateFrequency = frequency
         updateFrequencyItem.submenu = updateFrequencySubmenu()
         scheduleCheckTimer()
+        refreshSettingsControls()
     }
 
     @objc private func toggleQuietHours() {
         quietHoursEnabled.toggle()
         quietHoursItem.state = quietHoursEnabled ? .on : .off
+        refreshSettingsControls()
     }
 
     @objc private func toggleCleanupAfterUpdates() {
         runsCleanupAfterUpdates.toggle()
         cleanupItem.state = runsCleanupAfterUpdates ? .on : .off
+        refreshSettingsControls()
     }
 
     @objc private func toggleNotifications() {
         sendsNotifications.toggle()
         notificationsItem.state = sendsNotifications ? .on : .off
         requestNotificationPermissionIfNeeded()
+        refreshSettingsControls()
     }
 
     @objc private func ignorePackage(_ sender: NSMenuItem) {
@@ -339,6 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ignoredPackageNames = ignored
         visibleOutdatedPackages = actionablePackages(from: lastOutdatedPackages)
         ignoredPackagesItem.submenu = ignoredPackagesSubmenu()
+        refreshSettingsControls()
         render(visibleOutdatedPackages.isEmpty ? .current : .outdated(visibleOutdatedPackages))
     }
 
@@ -349,11 +391,206 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ignoredPackageNames = ignored
         visibleOutdatedPackages = actionablePackages(from: lastOutdatedPackages)
         ignoredPackagesItem.submenu = ignoredPackagesSubmenu()
+        refreshSettingsControls()
         render(visibleOutdatedPackages.isEmpty ? .current : .outdated(visibleOutdatedPackages))
     }
 
     @objc private func openBrewDoctorInTerminal() {
         TerminalLauncher.open(command: "brew doctor")
+    }
+
+    @objc private func settingsToggleAutomaticUpdates() {
+        toggleAutomaticUpdates()
+    }
+
+    @objc private func settingsToggleLaunchAtLogin() {
+        toggleLaunchAtLogin()
+    }
+
+    @objc private func settingsToggleQuietHours() {
+        toggleQuietHours()
+    }
+
+    @objc private func settingsToggleCleanupAfterUpdates() {
+        toggleCleanupAfterUpdates()
+    }
+
+    @objc private func settingsToggleNotifications() {
+        toggleNotifications()
+    }
+
+    @objc private func settingsToggleCheersSound() {
+        toggleCheersSound()
+    }
+
+    @objc private func settingsFrequencyChanged(_ sender: NSPopUpButton) {
+        guard let rawValue = sender.selectedItem?.representedObject as? String,
+              let frequency = UpdateFrequency(rawValue: rawValue) else { return }
+        updateFrequency = frequency
+        updateFrequencyItem.submenu = updateFrequencySubmenu()
+        scheduleCheckTimer()
+        refreshSettingsControls()
+    }
+
+    @objc private func settingsUnignoreSelectedPackage() {
+        guard let packageName = settingsIgnoredPopUp?.selectedItem?.representedObject as? String else { return }
+        var ignored = ignoredPackageNames
+        ignored.remove(packageName)
+        ignoredPackageNames = ignored
+        visibleOutdatedPackages = actionablePackages(from: lastOutdatedPackages)
+        ignoredPackagesItem.submenu = ignoredPackagesSubmenu()
+        refreshSettingsControls()
+        render(visibleOutdatedPackages.isEmpty ? .current : .outdated(visibleOutdatedPackages))
+    }
+
+    private func makeSettingsWindow() -> NSWindow {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Homebew Menubar Settings"
+        window.isReleasedWhenClosed = false
+        window.center()
+
+        let contentView = NSView()
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 14
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let automationSection = sectionTitle("Automation")
+        settingsAutoUpdateButton = checkbox(title: "Auto update packages in the background", action: #selector(settingsToggleAutomaticUpdates))
+        settingsLaunchAtLoginButton = checkbox(title: "Launch at login", action: #selector(settingsToggleLaunchAtLogin))
+        settingsQuietHoursButton = checkbox(title: "Quiet hours from 10 PM to 8 AM", action: #selector(settingsToggleQuietHours))
+
+        let frequencyRow = NSStackView()
+        frequencyRow.orientation = .horizontal
+        frequencyRow.alignment = .centerY
+        frequencyRow.spacing = 12
+        let frequencyLabel = label("Check frequency")
+        settingsFrequencyPopUp = NSPopUpButton()
+        settingsFrequencyPopUp?.target = self
+        settingsFrequencyPopUp?.action = #selector(settingsFrequencyChanged(_:))
+        frequencyRow.addArrangedSubview(frequencyLabel)
+        if let settingsFrequencyPopUp {
+            settingsFrequencyPopUp.widthAnchor.constraint(equalToConstant: 180).isActive = true
+            frequencyRow.addArrangedSubview(settingsFrequencyPopUp)
+        }
+
+        let behaviorSection = sectionTitle("Behavior")
+        settingsCleanupButton = checkbox(title: "Run brew cleanup after successful updates", action: #selector(settingsToggleCleanupAfterUpdates))
+        settingsNotificationsButton = checkbox(title: "Notify when updates finish or need attention", action: #selector(settingsToggleNotifications))
+        settingsCheersSoundButton = checkbox(title: "Play cheers sound after successful updates", action: #selector(settingsToggleCheersSound))
+
+        let ignoredSection = sectionTitle("Ignored Packages")
+        let ignoredHelp = mutedLabel("Ignored packages are skipped by auto-update and Update All.")
+        let ignoredRow = NSStackView()
+        ignoredRow.orientation = .horizontal
+        ignoredRow.alignment = .centerY
+        ignoredRow.spacing = 8
+        settingsIgnoredPopUp = NSPopUpButton()
+        settingsIgnoredPopUp?.widthAnchor.constraint(equalToConstant: 260).isActive = true
+        settingsUnignoreButton = NSButton(title: "Stop Ignoring", target: self, action: #selector(settingsUnignoreSelectedPackage))
+        if let settingsIgnoredPopUp {
+            ignoredRow.addArrangedSubview(settingsIgnoredPopUp)
+        }
+        if let settingsUnignoreButton {
+            ignoredRow.addArrangedSubview(settingsUnignoreButton)
+        }
+
+        [
+            automationSection,
+            settingsAutoUpdateButton,
+            settingsLaunchAtLoginButton,
+            settingsQuietHoursButton,
+            frequencyRow,
+            separator(),
+            behaviorSection,
+            settingsCleanupButton,
+            settingsNotificationsButton,
+            settingsCheersSoundButton,
+            separator(),
+            ignoredSection,
+            ignoredHelp,
+            ignoredRow
+        ].compactMap { $0 }.forEach(stack.addArrangedSubview)
+
+        contentView.addSubview(stack)
+        window.contentView = contentView
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -24),
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24)
+        ])
+
+        return window
+    }
+
+    private func refreshSettingsControls() {
+        settingsAutoUpdateButton?.state = automaticallyUpdatesPackages ? .on : .off
+        settingsLaunchAtLoginButton?.state = launchAtLoginEnabled ? .on : .off
+        settingsQuietHoursButton?.state = quietHoursEnabled ? .on : .off
+        settingsCleanupButton?.state = runsCleanupAfterUpdates ? .on : .off
+        settingsNotificationsButton?.state = sendsNotifications ? .on : .off
+        settingsCheersSoundButton?.state = playsCheersSound ? .on : .off
+
+        settingsFrequencyPopUp?.removeAllItems()
+        for frequency in UpdateFrequency.allCases {
+            settingsFrequencyPopUp?.addItem(withTitle: frequency.title)
+            settingsFrequencyPopUp?.lastItem?.representedObject = frequency.rawValue
+        }
+        settingsFrequencyPopUp?.selectItem(withTitle: updateFrequency.title)
+
+        settingsIgnoredPopUp?.removeAllItems()
+        let ignored = ignoredPackageNames.sorted()
+        if ignored.isEmpty {
+            settingsIgnoredPopUp?.addItem(withTitle: "No ignored packages")
+            settingsIgnoredPopUp?.isEnabled = false
+            settingsUnignoreButton?.isEnabled = false
+        } else {
+            settingsIgnoredPopUp?.isEnabled = true
+            settingsUnignoreButton?.isEnabled = true
+            for packageName in ignored {
+                settingsIgnoredPopUp?.addItem(withTitle: packageName)
+                settingsIgnoredPopUp?.lastItem?.representedObject = packageName
+            }
+        }
+    }
+
+    private func sectionTitle(_ title: String) -> NSTextField {
+        let field = NSTextField(labelWithString: title)
+        field.font = .systemFont(ofSize: 13, weight: .semibold)
+        return field
+    }
+
+    private func label(_ title: String) -> NSTextField {
+        let field = NSTextField(labelWithString: title)
+        field.font = .systemFont(ofSize: 13)
+        return field
+    }
+
+    private func mutedLabel(_ title: String) -> NSTextField {
+        let field = NSTextField(labelWithString: title)
+        field.font = .systemFont(ofSize: 12)
+        field.textColor = .secondaryLabelColor
+        return field
+    }
+
+    private func checkbox(title: String, action: Selector) -> NSButton {
+        NSButton(checkboxWithTitle: title, target: self, action: action)
+    }
+
+    private func separator() -> NSBox {
+        let box = NSBox()
+        box.boxType = .separator
+        box.widthAnchor.constraint(equalToConstant: 412).isActive = true
+        return box
     }
 
     private func checkForOutdatedPackages() {
@@ -1235,6 +1472,7 @@ private final class BrewUpdateOperation {
 
 private enum MenuIcon {
     static let refresh = symbol("arrow.clockwise")
+    static let settings = symbol("gearshape")
     static let updating = symbol("arrow.triangle.2.circlepath")
     static let packageList = symbol("list.bullet")
     static let formula = symbol("terminal")

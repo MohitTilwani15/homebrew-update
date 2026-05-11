@@ -24,13 +24,17 @@ The update menu also shows a **Stop Update** item while Homebrew is running. Cho
 
 The menu also includes:
 
+- **Update History**, **Last checked**, **Last updated**, and **Brew Doctor** status.
+
+Open **Settings...** or press `Command + ,` for preferences:
+
 - **Launch at Login** to start the app after reboot.
 - **Check Frequency** for hourly, every 6 hours, daily, or manual-only checks.
 - **Quiet Hours (10 PM-8 AM)** to pause background auto-updates overnight.
 - **Run Cleanup After Updates** for optional `brew cleanup`.
 - **Notify on Completion** for macOS notifications when updates finish or need attention.
+- **Play Cheers Sound** for the success sound.
 - **Ignored Packages** for packages you want excluded from auto-update and update-all.
-- **Update History**, **Last checked**, **Last updated**, and **Brew Doctor** status.
 
 When an update leaves everything current, the beer icon plays a quick cheers animation. **Play Cheers Sound** is enabled by default for new installs; turn it off from the menu if you prefer a silent success state.
 
