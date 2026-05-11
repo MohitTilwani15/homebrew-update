@@ -32,7 +32,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var ignoredPackagesItem: NSMenuItem!
     private var doctorItem: NSMenuItem!
     private var lastCheckedItem: NSMenuItem!
-    private var lastUpdatedItem: NSMenuItem!
     private var historyItem: NSMenuItem!
     private var checkTimer: Timer?
     private var brewDoctorTimer: Timer?
@@ -95,10 +94,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastCheckedAt: Date? {
         get { UserDefaults.standard.object(forKey: "lastCheckedAt") as? Date }
         set { UserDefaults.standard.set(newValue, forKey: "lastCheckedAt") }
-    }
-    private var lastUpdatedAt: Date? {
-        get { UserDefaults.standard.object(forKey: "lastUpdatedAt") as? Date }
-        set { UserDefaults.standard.set(newValue, forKey: "lastUpdatedAt") }
     }
     private var launchAtLoginEnabled: Bool {
         SMAppService.mainApp.status == .enabled
@@ -185,8 +180,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         doctorItem.isHidden = true
         lastCheckedItem = NSMenuItem(title: lastCheckedTitle, action: nil, keyEquivalent: "")
         lastCheckedItem.image = MenuIcon.checked
-        lastUpdatedItem = NSMenuItem(title: lastUpdatedTitle, action: nil, keyEquivalent: "")
-        lastUpdatedItem.image = MenuIcon.updated
         historyItem = NSMenuItem(title: "Update History", action: nil, keyEquivalent: "")
         historyItem.image = MenuIcon.history
         historyItem.submenu = historySubmenu()
@@ -200,7 +193,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(terminalItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(lastCheckedItem)
-        menu.addItem(lastUpdatedItem)
         menu.addItem(historyItem)
         menu.addItem(doctorItem)
         menu.addItem(NSMenuItem.separator())
@@ -675,7 +667,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func recordSuccessfulUpdate(packageCount: Int) {
-        lastUpdatedAt = Date()
         updateStatusMenuItems()
 
         let packageText = packageCount == 1 ? "1 package" : "\(packageCount) packages"
@@ -689,17 +680,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusMenuItems() {
         lastCheckedItem.title = lastCheckedTitle
-        lastUpdatedItem.title = lastUpdatedTitle
     }
 
     private var lastCheckedTitle: String {
         guard let lastCheckedAt else { return "Last checked: Never" }
         return "Last checked: \(DateFormatter.menuTime.string(from: lastCheckedAt))"
-    }
-
-    private var lastUpdatedTitle: String {
-        guard let lastUpdatedAt else { return "Last updated: Never" }
-        return "Last updated: \(DateFormatter.menuTime.string(from: lastUpdatedAt))"
     }
 
     private func requestNotificationPermissionIfNeeded() {

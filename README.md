@@ -24,7 +24,7 @@ The update menu also shows a **Stop Update** item while Homebrew is running. Cho
 
 The menu also includes:
 
-- **Update History**, **Last checked**, **Last updated**, and **Brew Doctor** status.
+- **Update History**, **Last checked**, and **Brew Doctor** status.
 
 Open **Settings...** or press `Command + ,` for preferences:
 
