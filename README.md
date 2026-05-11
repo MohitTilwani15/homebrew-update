@@ -1,14 +1,35 @@
 # Homebew Menubar
 
-A small native macOS menu bar app that keeps Homebrew packages up to date.
+A native macOS menu bar app for keeping Homebrew packages up to date.
 
-The menu bar icon is a beer glass:
+Homebew Menubar sits in the menu bar, checks Homebrew for outdated formulae and casks, and can update everything automatically in the background. The icon is a beer glass: full when everything is current, empty when updates are waiting, and partially filled while checks or updates are running.
 
-- Full beer glass: all Homebrew packages are current.
-- Empty beer glass: one or more packages need updates.
-- Partial beer glass: checking or updating.
+## Features
 
-Click the beer icon and choose **Update Packages**. The refresh item shows an update icon with an estimated percent while the app runs:
+- Native macOS menu bar app built with Swift and AppKit.
+- Beer glass status icon for current, outdated, checking, and updating states.
+- Background auto-update enabled by default.
+- Update all packages or choose one outdated package from the menu.
+- Count-based progress for update-all, package-name progress for single-package updates.
+- Stop an active update from the menu.
+- Terminal handoff when Homebrew needs a password for `sudo` cask work.
+- Settings window with `Command + ,`.
+- Launch at login support.
+- Configurable check frequency: hourly, every 6 hours, daily, or manual only.
+- Optional `brew cleanup` after successful updates.
+- Optional macOS notifications.
+- Quick cheers animation and success sound when everything is caught up.
+- Update history and last checked status.
+
+## How It Works
+
+The app checks Homebrew with:
+
+```text
+brew outdated --json=v2
+```
+
+Updates run as explicit formula or cask upgrades:
 
 ```text
 brew update
@@ -16,29 +37,26 @@ brew upgrade --formula ...
 brew upgrade --cask ...
 ```
 
-When multiple packages are outdated, use **Update One Package** to choose a specific formula or cask. Each item shows the package name and version change in the menu. Single-package updates show the selected package name while they run; update-all progress stays count-based.
+After an update finishes, the app checks Homebrew again and returns the beer glass to full when no updates remain.
 
-The update menu also shows a **Stop Update** item while Homebrew is running. Choosing it sends an interrupt to the active `brew` process, then terminates it if it is still running after a short grace period.
+## Password-Required Casks
 
-**Auto Update in Background** is enabled by default, so the app automatically upgrades outdated packages during its periodic checks. Turn it off from the menu if you prefer manual updates. If Homebrew needs a password for a cask, the app pauses and shows **Open Terminal to Finish**.
+Some casks uninstall or replace files with `sudo`, which requires an interactive password prompt. Menu bar apps do not have a terminal attached, so Homebew Menubar does not try to collect passwords itself.
 
-The menu also includes:
+When this happens, the app shows **Open Terminal to Finish**. Clicking it opens Terminal with the exact Homebrew command so macOS and Homebrew can ask for the password normally. After Terminal finishes, return to the app and choose **Refresh**.
 
-- **Update History** and **Last checked** status.
+## Settings
 
-Open **Settings...** or press `Command + ,` for preferences:
+Open **Settings...** from the menu or press `Command + ,`.
 
-- **Launch at Login** to start the app after reboot.
-- **Check Frequency** for hourly, every 6 hours, daily, or manual-only checks.
-- **Run Cleanup After Updates** for optional `brew cleanup`.
-- **Notify on Completion** for macOS notifications when updates finish or need attention.
-- **Play Cheers Sound** for the success sound.
+Settings include:
 
-When an update leaves everything current, the beer icon plays a quick cheers animation. **Play Cheers Sound** is enabled by default for new installs; turn it off from the menu if you prefer a silent success state.
-
-Some casks uninstall or replace files with `sudo`, which requires an interactive password prompt. In that case the app shows **Open Terminal to Finish** so Homebrew can ask for your password in Terminal. When Terminal finishes, return to the app and choose **Refresh**.
-
-When the update finishes, the app checks `brew outdated --json=v2` again and returns the icon to full when everything is current.
+- Auto update in background.
+- Launch at login.
+- Check frequency.
+- Run cleanup after updates.
+- Notifications.
+- Cheers sound.
 
 ## Build
 
@@ -58,6 +76,21 @@ dist/Homebew Menubar.app
 swift run HomebewMenubar
 ```
 
-## Install
+## Install Locally
 
 Build the app, then move `dist/Homebew Menubar.app` into `/Applications` or `~/Applications`.
+
+## Distribution
+
+For public distribution, sign and notarize the app with an Apple Developer ID certificate. See [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+
+## Project Notes
+
+- Requires macOS 13 or newer.
+- Requires Homebrew installed at `/opt/homebrew/bin/brew` or `/usr/local/bin/brew`.
+- The app does not send package data anywhere.
+- Auto-update is on by default for new installs.
+
+## Launch Materials
+
+Planning to post about the project? See [docs/LAUNCH_POST.md](docs/LAUNCH_POST.md).
