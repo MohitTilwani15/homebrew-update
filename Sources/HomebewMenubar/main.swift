@@ -29,11 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notificationsItem: NSMenuItem!
     private var cheersSoundItem: NSMenuItem!
     private var ignoredPackagesItem: NSMenuItem!
-    private var doctorItem: NSMenuItem!
     private var lastCheckedItem: NSMenuItem!
     private var historyItem: NSMenuItem!
     private var checkTimer: Timer?
-    private var brewDoctorTimer: Timer?
     private var cheersTimer: Timer?
     private var settingsWindow: NSWindow?
     private var settingsAutoUpdateButton: NSButton?
@@ -158,10 +156,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ignoredPackagesItem = NSMenuItem(title: "Ignored Packages", action: nil, keyEquivalent: "")
         ignoredPackagesItem.image = MenuIcon.ignored
         ignoredPackagesItem.submenu = ignoredPackagesSubmenu()
-        doctorItem = NSMenuItem(title: "Brew Doctor: OK", action: #selector(openBrewDoctorInTerminal), keyEquivalent: "d")
-        doctorItem.target = self
-        doctorItem.image = MenuIcon.doctor
-        doctorItem.isHidden = true
         lastCheckedItem = NSMenuItem(title: lastCheckedTitle, action: nil, keyEquivalent: "")
         lastCheckedItem.image = MenuIcon.checked
         historyItem = NSMenuItem(title: "Update History", action: nil, keyEquivalent: "")
@@ -178,7 +172,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(lastCheckedItem)
         menu.addItem(historyItem)
-        menu.addItem(doctorItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(settingsItem)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -187,9 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         render(.checking)
         checkForOutdatedPackages()
         scheduleCheckTimer()
-        scheduleBrewDoctorTimer()
         requestNotificationPermissionIfNeeded()
-        checkBrewDoctor()
     }
 
     private func setupApplicationMenu() {
@@ -210,7 +201,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         checkTimer?.invalidate()
-        brewDoctorTimer?.invalidate()
         cheersTimer?.invalidate()
         activeOperation?.cancel()
     }
@@ -363,10 +353,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ignoredPackagesItem.submenu = ignoredPackagesSubmenu()
         refreshSettingsControls()
         render(visibleOutdatedPackages.isEmpty ? .current : .outdated(visibleOutdatedPackages))
-    }
-
-    @objc private func openBrewDoctorInTerminal() {
-        TerminalLauncher.open(command: "brew doctor")
     }
 
     @objc private func settingsToggleAutomaticUpdates() {
@@ -610,29 +596,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let interval = updateFrequency.interval else { return }
         checkTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             self?.checkForOutdatedPackages()
-        }
-    }
-
-    private func scheduleBrewDoctorTimer() {
-        brewDoctorTimer?.invalidate()
-        brewDoctorTimer = Timer.scheduledTimer(withTimeInterval: 24 * 60 * 60, repeats: true) { [weak self] _ in
-            self?.checkBrewDoctor()
-        }
-    }
-
-    private func checkBrewDoctor() {
-        checker.brewDoctorStatus { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                switch result {
-                case .success(let warning):
-                    self.doctorItem.isHidden = !warning
-                    self.doctorItem.title = warning ? "Brew Doctor Needs Attention" : "Brew Doctor: OK"
-                case .failure:
-                    self.doctorItem.isHidden = false
-                    self.doctorItem.title = "Brew Doctor Check Failed"
-                }
-            }
         }
     }
 
@@ -1109,19 +1072,6 @@ private final class BrewPackageService {
         return operation
     }
 
-    func brewDoctorStatus(completion: @escaping (Result<Bool, Error>) -> Void) {
-        queue.async {
-            do {
-                _ = try self.runBrew(["doctor"])
-                completion(.success(false))
-            } catch BrewError.failed(_, let output) {
-                completion(.success(!output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
-            } catch {
-                completion(.failure(error))
-            }
-        }
-    }
-
     fileprivate func runBrew(
         _ arguments: [String],
         operation: BrewUpdateOperation? = nil,
@@ -1442,7 +1392,6 @@ private enum MenuIcon {
     static let sound = symbol("speaker.wave.2")
     static let ignored = symbol("eye.slash")
     static let unignored = symbol("eye")
-    static let doctor = symbol("stethoscope")
     static let checked = symbol("checkmark.circle")
     static let updated = symbol("checkmark.seal")
     static let history = symbol("clock")
