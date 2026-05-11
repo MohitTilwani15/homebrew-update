@@ -1,4 +1,6 @@
 import Cocoa
+import ServiceManagement
+import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private enum State {
@@ -20,15 +22,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var stopItem: NSMenuItem!
     private var terminalItem: NSMenuItem!
     private var autoUpdateItem: NSMenuItem!
+    private var launchAtLoginItem: NSMenuItem!
+    private var updateFrequencyItem: NSMenuItem!
+    private var quietHoursItem: NSMenuItem!
+    private var cleanupItem: NSMenuItem!
+    private var notificationsItem: NSMenuItem!
     private var cheersSoundItem: NSMenuItem!
+    private var ignoredPackagesItem: NSMenuItem!
+    private var doctorItem: NSMenuItem!
+    private var lastCheckedItem: NSMenuItem!
+    private var lastUpdatedItem: NSMenuItem!
+    private var historyItem: NSMenuItem!
     private var checkTimer: Timer?
+    private var brewDoctorTimer: Timer?
     private var cheersTimer: Timer?
     private var isUpdating = false
     private var activeOperation: BrewUpdateOperation?
     private var latestProgress = UpdateProgress(percent: 0, message: "Starting update...")
     private var lastOutdatedPackages: [BrewPackage] = []
+    private var visibleOutdatedPackages: [BrewPackage] = []
     private var packageByMenuTag: [Int: BrewPackage] = [:]
+    private var ignorePackageByMenuTag: [Int: BrewPackage] = [:]
+    private var unignorePackageByMenuTag: [Int: String] = [:]
+    private var frequencyByMenuTag: [Int: UpdateFrequency] = [:]
     private var nextPackageMenuTag = 1_000
+    private var activeUpdateStartedAutomatically = false
     private var terminalCommand: String?
     private var celebrateAfterNextCurrentCheck = false
     private var playsCheersSound: Bool {
@@ -39,11 +57,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         get { UserDefaults.standard.bool(forKey: "automaticallyUpdatesPackages") }
         set { UserDefaults.standard.set(newValue, forKey: "automaticallyUpdatesPackages") }
     }
+    private var updateFrequency: UpdateFrequency {
+        get { UpdateFrequency(rawValue: UserDefaults.standard.string(forKey: "updateFrequency") ?? "") ?? .hourly }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "updateFrequency") }
+    }
+    private var quietHoursEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "quietHoursEnabled") }
+        set { UserDefaults.standard.set(newValue, forKey: "quietHoursEnabled") }
+    }
+    private var runsCleanupAfterUpdates: Bool {
+        get { UserDefaults.standard.bool(forKey: "runsCleanupAfterUpdates") }
+        set { UserDefaults.standard.set(newValue, forKey: "runsCleanupAfterUpdates") }
+    }
+    private var sendsNotifications: Bool {
+        get { UserDefaults.standard.bool(forKey: "sendsNotifications") }
+        set { UserDefaults.standard.set(newValue, forKey: "sendsNotifications") }
+    }
+    private var ignoredPackageNames: Set<String> {
+        get { Set(UserDefaults.standard.stringArray(forKey: "ignoredPackageNames") ?? []) }
+        set { UserDefaults.standard.set(Array(newValue).sorted(), forKey: "ignoredPackageNames") }
+    }
+    private var updateHistory: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "updateHistory") ?? [] }
+        set { UserDefaults.standard.set(Array(newValue.prefix(10)), forKey: "updateHistory") }
+    }
+    private var lastCheckedAt: Date? {
+        get { UserDefaults.standard.object(forKey: "lastCheckedAt") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "lastCheckedAt") }
+    }
+    private var lastUpdatedAt: Date? {
+        get { UserDefaults.standard.object(forKey: "lastUpdatedAt") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "lastUpdatedAt") }
+    }
+    private var launchAtLoginEnabled: Bool {
+        SMAppService.mainApp.status == .enabled
+    }
+    private var isInQuietHours: Bool {
+        guard quietHoursEnabled else { return false }
+        let hour = Calendar.current.component(.hour, from: Date())
+        return hour >= 22 || hour < 8
+    }
+    private var shouldAutoUpdateNow: Bool {
+        automaticallyUpdatesPackages && updateFrequency != .manual && !isInQuietHours
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         UserDefaults.standard.register(defaults: [
             "playsCheersSound": true,
-            "automaticallyUpdatesPackages": true
+            "automaticallyUpdatesPackages": true,
+            "updateFrequency": UpdateFrequency.hourly.rawValue,
+            "quietHoursEnabled": true,
+            "runsCleanupAfterUpdates": false,
+            "sendsNotifications": true
         ])
         NSApp.setActivationPolicy(.accessory)
 
@@ -73,10 +138,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         autoUpdateItem.target = self
         autoUpdateItem.image = MenuIcon.automaticUpdate
         autoUpdateItem.state = automaticallyUpdatesPackages ? .on : .off
+        launchAtLoginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        launchAtLoginItem.target = self
+        launchAtLoginItem.image = MenuIcon.login
+        launchAtLoginItem.state = launchAtLoginEnabled ? .on : .off
+        updateFrequencyItem = NSMenuItem(title: "Check Frequency", action: nil, keyEquivalent: "")
+        updateFrequencyItem.image = MenuIcon.frequency
+        updateFrequencyItem.submenu = updateFrequencySubmenu()
+        quietHoursItem = NSMenuItem(title: "Quiet Hours (10 PM-8 AM)", action: #selector(toggleQuietHours), keyEquivalent: "")
+        quietHoursItem.target = self
+        quietHoursItem.image = MenuIcon.quietHours
+        quietHoursItem.state = quietHoursEnabled ? .on : .off
+        cleanupItem = NSMenuItem(title: "Run Cleanup After Updates", action: #selector(toggleCleanupAfterUpdates), keyEquivalent: "")
+        cleanupItem.target = self
+        cleanupItem.image = MenuIcon.cleanup
+        cleanupItem.state = runsCleanupAfterUpdates ? .on : .off
+        notificationsItem = NSMenuItem(title: "Notify on Completion", action: #selector(toggleNotifications), keyEquivalent: "")
+        notificationsItem.target = self
+        notificationsItem.image = MenuIcon.notification
+        notificationsItem.state = sendsNotifications ? .on : .off
         cheersSoundItem = NSMenuItem(title: "Play Cheers Sound", action: #selector(toggleCheersSound), keyEquivalent: "")
         cheersSoundItem.target = self
         cheersSoundItem.image = MenuIcon.sound
         cheersSoundItem.state = playsCheersSound ? .on : .off
+        ignoredPackagesItem = NSMenuItem(title: "Ignored Packages", action: nil, keyEquivalent: "")
+        ignoredPackagesItem.image = MenuIcon.ignored
+        ignoredPackagesItem.submenu = ignoredPackagesSubmenu()
+        doctorItem = NSMenuItem(title: "Brew Doctor: OK", action: #selector(openBrewDoctorInTerminal), keyEquivalent: "d")
+        doctorItem.target = self
+        doctorItem.image = MenuIcon.doctor
+        doctorItem.isHidden = true
+        lastCheckedItem = NSMenuItem(title: lastCheckedTitle, action: nil, keyEquivalent: "")
+        lastCheckedItem.image = MenuIcon.checked
+        lastUpdatedItem = NSMenuItem(title: lastUpdatedTitle, action: nil, keyEquivalent: "")
+        lastUpdatedItem.image = MenuIcon.updated
+        historyItem = NSMenuItem(title: "Update History", action: nil, keyEquivalent: "")
+        historyItem.image = MenuIcon.history
+        historyItem.submenu = historySubmenu()
 
         let menu = NSMenu()
         menu.addItem(packageItem)
@@ -86,27 +184,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(stopItem)
         menu.addItem(terminalItem)
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(lastCheckedItem)
+        menu.addItem(lastUpdatedItem)
+        menu.addItem(historyItem)
+        menu.addItem(doctorItem)
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(autoUpdateItem)
+        menu.addItem(launchAtLoginItem)
+        menu.addItem(updateFrequencyItem)
+        menu.addItem(quietHoursItem)
+        menu.addItem(cleanupItem)
+        menu.addItem(notificationsItem)
         menu.addItem(cheersSoundItem)
+        menu.addItem(ignoredPackagesItem)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
 
         render(.checking)
         checkForOutdatedPackages()
-        checkTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
-            self?.checkForOutdatedPackages()
-        }
+        scheduleCheckTimer()
+        scheduleBrewDoctorTimer()
+        requestNotificationPermissionIfNeeded()
+        checkBrewDoctor()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         checkTimer?.invalidate()
+        brewDoctorTimer?.invalidate()
         cheersTimer?.invalidate()
         activeOperation?.cancel()
     }
 
     @objc private func refreshAndUpgrade() {
         guard !isUpdating else { return }
-        beginUpdate(packages: lastOutdatedPackages, showsPackageNames: false)
+        let packages = visibleOutdatedPackages.isEmpty ? actionablePackages(from: lastOutdatedPackages) : visibleOutdatedPackages
+        beginUpdate(packages: packages, showsPackageNames: false)
     }
 
     @objc private func updateSpecificPackage(_ sender: NSMenuItem) {
@@ -115,12 +227,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         beginUpdate(packages: [package], showsPackageNames: true)
     }
 
-    private func beginUpdate(packages: [BrewPackage], showsPackageNames: Bool) {
+    private func beginUpdate(packages: [BrewPackage], showsPackageNames: Bool, startedAutomatically: Bool = false) {
         isUpdating = true
+        activeUpdateStartedAutomatically = startedAutomatically
         latestProgress = UpdateProgress(percent: 0, message: "Starting update...")
         render(.updating(latestProgress))
 
-        activeOperation = checker.updatePackages(packages: packages, showsPackageNames: showsPackageNames) { [weak self] progress in
+        activeOperation = checker.updatePackages(
+            packages: packages,
+            showsPackageNames: showsPackageNames,
+            performsCleanup: runsCleanupAfterUpdates
+        ) { [weak self] progress in
             DispatchQueue.main.async {
                 guard let self, self.isUpdating else { return }
                 self.latestProgress = progress
@@ -133,15 +250,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.activeOperation = nil
 
                 switch result {
-                case .success:
+                case .success(let updatedCount):
+                    self.recordSuccessfulUpdate(packageCount: updatedCount)
                     self.celebrateAfterNextCurrentCheck = true
                     self.checkForOutdatedPackages()
                 case .failure(let error):
                     if (error as? BrewError) == .canceled {
                         self.render(.canceled)
                     } else if case let BrewError.passwordRequired(command) = error {
+                        self.notify(title: "Homebew needs Terminal", body: "A package needs your password to finish updating.")
                         self.render(.passwordRequired(command))
                     } else {
+                        self.notify(title: "Homebew update failed", body: error.localizedDescription)
                         self.render(.failed(error.localizedDescription))
                         self.checkForOutdatedPackages()
                     }
@@ -176,6 +296,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func toggleLaunchAtLogin() {
+        do {
+            if launchAtLoginEnabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            render(.failed("Could not update Launch at Login: \(error.localizedDescription)"))
+        }
+        launchAtLoginItem.state = launchAtLoginEnabled ? .on : .off
+    }
+
+    @objc private func selectUpdateFrequency(_ sender: NSMenuItem) {
+        guard let frequency = frequencyByMenuTag[sender.tag] else { return }
+        updateFrequency = frequency
+        updateFrequencyItem.submenu = updateFrequencySubmenu()
+        scheduleCheckTimer()
+    }
+
+    @objc private func toggleQuietHours() {
+        quietHoursEnabled.toggle()
+        quietHoursItem.state = quietHoursEnabled ? .on : .off
+    }
+
+    @objc private func toggleCleanupAfterUpdates() {
+        runsCleanupAfterUpdates.toggle()
+        cleanupItem.state = runsCleanupAfterUpdates ? .on : .off
+    }
+
+    @objc private func toggleNotifications() {
+        sendsNotifications.toggle()
+        notificationsItem.state = sendsNotifications ? .on : .off
+        requestNotificationPermissionIfNeeded()
+    }
+
+    @objc private func ignorePackage(_ sender: NSMenuItem) {
+        guard let package = ignorePackageByMenuTag[sender.tag] else { return }
+        var ignored = ignoredPackageNames
+        ignored.insert(package.name)
+        ignoredPackageNames = ignored
+        visibleOutdatedPackages = actionablePackages(from: lastOutdatedPackages)
+        ignoredPackagesItem.submenu = ignoredPackagesSubmenu()
+        render(visibleOutdatedPackages.isEmpty ? .current : .outdated(visibleOutdatedPackages))
+    }
+
+    @objc private func unignorePackage(_ sender: NSMenuItem) {
+        guard let packageName = unignorePackageByMenuTag[sender.tag] else { return }
+        var ignored = ignoredPackageNames
+        ignored.remove(packageName)
+        ignoredPackageNames = ignored
+        visibleOutdatedPackages = actionablePackages(from: lastOutdatedPackages)
+        ignoredPackagesItem.submenu = ignoredPackagesSubmenu()
+        render(visibleOutdatedPackages.isEmpty ? .current : .outdated(visibleOutdatedPackages))
+    }
+
+    @objc private func openBrewDoctorInTerminal() {
+        TerminalLauncher.open(command: "brew doctor")
+    }
+
     private func checkForOutdatedPackages() {
         guard !isUpdating else { return }
 
@@ -186,22 +366,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 switch result {
                 case .success(let packages):
+                    self.lastCheckedAt = Date()
+                    self.updateStatusMenuItems()
                     self.lastOutdatedPackages = packages
-                    if packages.isEmpty {
+                    self.visibleOutdatedPackages = self.actionablePackages(from: packages)
+                    if self.visibleOutdatedPackages.isEmpty {
                         self.render(.current)
+                        if !packages.isEmpty {
+                            self.packageItem.title = "Only ignored packages are outdated"
+                        }
                         if self.celebrateAfterNextCurrentCheck {
                             self.celebrateAfterNextCurrentCheck = false
                             self.startCheersAnimation()
                         }
                     } else {
                         self.celebrateAfterNextCurrentCheck = false
-                        if self.automaticallyUpdatesPackages {
-                            self.beginUpdate(packages: packages, showsPackageNames: false)
+                        if self.shouldAutoUpdateNow {
+                            self.beginUpdate(packages: self.visibleOutdatedPackages, showsPackageNames: false, startedAutomatically: true)
                         } else {
-                            self.render(.outdated(packages))
+                            self.render(.outdated(self.visibleOutdatedPackages))
                         }
                     }
                 case .failure(let error):
+                    self.lastCheckedAt = Date()
+                    self.updateStatusMenuItems()
                     self.celebrateAfterNextCurrentCheck = false
                     if (error as? BrewError) == .missingExecutable {
                         self.render(.brewMissing)
@@ -211,6 +399,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    private func actionablePackages(from packages: [BrewPackage]) -> [BrewPackage] {
+        let ignored = ignoredPackageNames
+        return packages.filter { !ignored.contains($0.name) }
+    }
+
+    private func scheduleCheckTimer() {
+        checkTimer?.invalidate()
+        guard let interval = updateFrequency.interval else { return }
+        checkTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            self?.checkForOutdatedPackages()
+        }
+    }
+
+    private func scheduleBrewDoctorTimer() {
+        brewDoctorTimer?.invalidate()
+        brewDoctorTimer = Timer.scheduledTimer(withTimeInterval: 24 * 60 * 60, repeats: true) { [weak self] _ in
+            self?.checkBrewDoctor()
+        }
+    }
+
+    private func checkBrewDoctor() {
+        checker.brewDoctorStatus { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let warning):
+                    self.doctorItem.isHidden = !warning
+                    self.doctorItem.title = warning ? "Brew Doctor Needs Attention" : "Brew Doctor: OK"
+                case .failure:
+                    self.doctorItem.isHidden = false
+                    self.doctorItem.title = "Brew Doctor Check Failed"
+                }
+            }
+        }
+    }
+
+    private func recordSuccessfulUpdate(packageCount: Int) {
+        lastUpdatedAt = Date()
+        updateStatusMenuItems()
+
+        let packageText = packageCount == 1 ? "1 package" : "\(packageCount) packages"
+        let modeText = activeUpdateStartedAutomatically ? "Auto-updated" : "Updated"
+        let historyEntry = "\(DateFormatter.history.string(from: Date())) - \(modeText) \(packageText)"
+        updateHistory = [historyEntry] + updateHistory
+        historyItem.submenu = historySubmenu()
+
+        notify(title: "Homebew update complete", body: "\(modeText) \(packageText).")
+    }
+
+    private func updateStatusMenuItems() {
+        lastCheckedItem.title = lastCheckedTitle
+        lastUpdatedItem.title = lastUpdatedTitle
+    }
+
+    private var lastCheckedTitle: String {
+        guard let lastCheckedAt else { return "Last checked: Never" }
+        return "Last checked: \(DateFormatter.menuTime.string(from: lastCheckedAt))"
+    }
+
+    private var lastUpdatedTitle: String {
+        guard let lastUpdatedAt else { return "Last updated: Never" }
+        return "Last updated: \(DateFormatter.menuTime.string(from: lastUpdatedAt))"
+    }
+
+    private func requestNotificationPermissionIfNeeded() {
+        guard sendsNotifications else { return }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    private func notify(title: String, body: String) {
+        guard sendsNotifications else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
     private func startCheersAnimation() {
@@ -272,7 +538,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .outdated(let packages):
             statusItem.button?.image = BeerIcon.image(fillLevel: 0.08)
             statusItem.button?.toolTip = "\(packages.count) Homebrew package\(packages.count == 1 ? "" : "s") need updating"
-            packageItem.title = packageSummary(packages)
+            packageItem.title = automaticallyUpdatesPackages && isInQuietHours ? "Quiet hours. \(packageSummary(packages))" : packageSummary(packages)
             refreshItem.isEnabled = true
             refreshItem.title = packages.count == 1 ? "Update Package" : "Update All Packages"
             refreshItem.image = MenuIcon.refresh
@@ -317,9 +583,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = true
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
-            specificUpdateItem.isHidden = lastOutdatedPackages.isEmpty
-            specificUpdateItem.isEnabled = !lastOutdatedPackages.isEmpty
-            specificUpdateItem.submenu = packageSubmenu(for: lastOutdatedPackages)
+            specificUpdateItem.isHidden = visibleOutdatedPackages.isEmpty
+            specificUpdateItem.isEnabled = !visibleOutdatedPackages.isEmpty
+            specificUpdateItem.submenu = packageSubmenu(for: visibleOutdatedPackages)
             stopItem.isHidden = true
             stopItem.isEnabled = false
             terminalItem.isHidden = false
@@ -331,9 +597,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = true
             refreshItem.title = "Try Again"
             refreshItem.image = MenuIcon.refresh
-            specificUpdateItem.isHidden = lastOutdatedPackages.isEmpty
-            specificUpdateItem.isEnabled = !lastOutdatedPackages.isEmpty
-            specificUpdateItem.submenu = packageSubmenu(for: lastOutdatedPackages)
+            specificUpdateItem.isHidden = visibleOutdatedPackages.isEmpty
+            specificUpdateItem.isEnabled = !visibleOutdatedPackages.isEmpty
+            specificUpdateItem.submenu = packageSubmenu(for: visibleOutdatedPackages)
             stopItem.isHidden = true
             stopItem.isEnabled = false
             terminalItem.isHidden = true
@@ -365,6 +631,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func packageSubmenu(for packages: [BrewPackage]) -> NSMenu {
         let menu = NSMenu()
         packageByMenuTag.removeAll()
+        ignorePackageByMenuTag.removeAll()
         nextPackageMenuTag = 1_000
 
         let header = NSMenuItem(title: "Choose a package to update", action: nil, keyEquivalent: "")
@@ -383,6 +650,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
 
+        menu.addItem(NSMenuItem.separator())
+        let ignoreHeader = NSMenuItem(title: "Ignore from auto-update", action: nil, keyEquivalent: "")
+        ignoreHeader.isEnabled = false
+        menu.addItem(ignoreHeader)
+        for package in packages {
+            let item = NSMenuItem(title: package.name, action: #selector(ignorePackage(_:)), keyEquivalent: "")
+            item.target = self
+            item.image = MenuIcon.ignored
+            item.tag = nextPackageMenuTag
+            ignorePackageByMenuTag[item.tag] = package
+            nextPackageMenuTag += 1
+            menu.addItem(item)
+        }
+
+        return menu
+    }
+
+    private func ignoredPackagesSubmenu() -> NSMenu {
+        let menu = NSMenu()
+        unignorePackageByMenuTag.removeAll()
+        let ignored = ignoredPackageNames.sorted()
+
+        guard !ignored.isEmpty else {
+            let item = NSMenuItem(title: "No ignored packages", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+            return menu
+        }
+
+        for packageName in ignored {
+            let item = NSMenuItem(title: "Stop ignoring \(packageName)", action: #selector(unignorePackage(_:)), keyEquivalent: "")
+            item.target = self
+            item.image = MenuIcon.unignored
+            item.tag = nextPackageMenuTag
+            unignorePackageByMenuTag[item.tag] = packageName
+            nextPackageMenuTag += 1
+            menu.addItem(item)
+        }
+
+        return menu
+    }
+
+    private func updateFrequencySubmenu() -> NSMenu {
+        let menu = NSMenu()
+        frequencyByMenuTag.removeAll()
+
+        for frequency in UpdateFrequency.allCases {
+            let item = NSMenuItem(title: frequency.title, action: #selector(selectUpdateFrequency(_:)), keyEquivalent: "")
+            item.target = self
+            item.state = frequency == updateFrequency ? .on : .off
+            item.tag = nextPackageMenuTag
+            frequencyByMenuTag[item.tag] = frequency
+            nextPackageMenuTag += 1
+            menu.addItem(item)
+        }
+
+        return menu
+    }
+
+    private func historySubmenu() -> NSMenu {
+        let menu = NSMenu()
+        let history = updateHistory
+
+        guard !history.isEmpty else {
+            let item = NSMenuItem(title: "No updates yet", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+            return menu
+        }
+
+        for entry in history {
+            let item = NSMenuItem(title: entry, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+
         return menu
     }
 }
@@ -390,6 +733,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 private struct UpdateProgress {
     let percent: Int
     let message: String
+}
+
+private enum UpdateFrequency: String, CaseIterable {
+    case hourly
+    case sixHours
+    case daily
+    case manual
+
+    var title: String {
+        switch self {
+        case .hourly:
+            return "Hourly"
+        case .sixHours:
+            return "Every 6 Hours"
+        case .daily:
+            return "Daily"
+        case .manual:
+            return "Manual Only"
+        }
+    }
+
+    var interval: TimeInterval? {
+        switch self {
+        case .hourly:
+            return 60 * 60
+        case .sixHours:
+            return 6 * 60 * 60
+        case .daily:
+            return 24 * 60 * 60
+        case .manual:
+            return nil
+        }
+    }
 }
 
 private struct BrewPackage {
@@ -521,12 +897,14 @@ private final class BrewPackageService {
     func updatePackages(
         packages: [BrewPackage],
         showsPackageNames: Bool,
+        performsCleanup: Bool,
         onProgress: @escaping (UpdateProgress) -> Void,
-        completion: @escaping (Result<Void, Error>) -> Void
+        completion: @escaping (Result<Int, Error>) -> Void
     ) -> BrewUpdateOperation {
         let operation = BrewUpdateOperation(
             packages: packages,
             showsPackageNames: showsPackageNames,
+            performsCleanup: performsCleanup,
             runner: self,
             onProgress: onProgress,
             completion: completion
@@ -537,6 +915,19 @@ private final class BrewPackageService {
         }
 
         return operation
+    }
+
+    func brewDoctorStatus(completion: @escaping (Result<Bool, Error>) -> Void) {
+        queue.async {
+            do {
+                _ = try self.runBrew(["doctor"])
+                completion(.success(false))
+            } catch BrewError.failed(_, let output) {
+                completion(.success(!output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+            } catch {
+                completion(.failure(error))
+            }
+        }
     }
 
     fileprivate func runBrew(
@@ -703,9 +1094,10 @@ private final class BrewPackageService {
 private final class BrewUpdateOperation {
     private var packages: [BrewPackage]
     private let showsPackageNames: Bool
+    private let performsCleanup: Bool
     private let runner: BrewPackageService
     private let onProgress: (UpdateProgress) -> Void
-    private let completion: (Result<Void, Error>) -> Void
+    private let completion: (Result<Int, Error>) -> Void
     private let lock = NSLock()
     private var currentProcess: Process?
     private var canceled = false
@@ -720,12 +1112,14 @@ private final class BrewUpdateOperation {
     init(
         packages: [BrewPackage],
         showsPackageNames: Bool,
+        performsCleanup: Bool,
         runner: BrewPackageService,
         onProgress: @escaping (UpdateProgress) -> Void,
-        completion: @escaping (Result<Void, Error>) -> Void
+        completion: @escaping (Result<Int, Error>) -> Void
     ) {
         self.packages = packages
         self.showsPackageNames = showsPackageNames
+        self.performsCleanup = performsCleanup
         self.runner = runner
         self.onProgress = onProgress
         self.completion = completion
@@ -744,7 +1138,7 @@ private final class BrewUpdateOperation {
 
             guard !packages.isEmpty else {
                 report(percent: 100, message: "No packages need updating")
-                return
+                return 0
             }
 
             for (index, package) in packages.enumerated() {
@@ -761,7 +1155,13 @@ private final class BrewUpdateOperation {
                 report(percent: percent(completed: index + 1), message: updateCountMessage(completed: index + 1))
             }
 
+            if performsCleanup {
+                report(percent: 96, message: "Cleaning up Homebrew")
+                _ = try runner.runBrew(["cleanup"], operation: self)
+            }
+
             report(percent: 100, message: "Update complete")
+            return completedPackages
         })
     }
 
@@ -842,13 +1242,41 @@ private enum MenuIcon {
     static let stop = symbol("stop.circle")
     static let terminal = symbol("terminal")
     static let automaticUpdate = symbol("clock.arrow.circlepath")
+    static let login = symbol("power")
+    static let frequency = symbol("timer")
+    static let quietHours = symbol("moon")
+    static let cleanup = symbol("trash")
+    static let notification = symbol("bell")
     static let sound = symbol("speaker.wave.2")
+    static let ignored = symbol("eye.slash")
+    static let unignored = symbol("eye")
+    static let doctor = symbol("stethoscope")
+    static let checked = symbol("checkmark.circle")
+    static let updated = symbol("checkmark.seal")
+    static let history = symbol("clock")
 
     private static func symbol(_ name: String) -> NSImage? {
         let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
         image?.isTemplate = true
         return image
     }
+}
+
+private extension DateFormatter {
+    static let menuTime: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.doesRelativeDateFormatting = true
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    static let history: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter
+    }()
 }
 
 private enum TerminalLauncher {

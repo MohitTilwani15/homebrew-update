@@ -22,6 +22,16 @@ The update menu also shows a **Stop Update** item while Homebrew is running. Cho
 
 **Auto Update in Background** is enabled by default, so the app automatically upgrades outdated packages during its periodic checks. Turn it off from the menu if you prefer manual updates. If Homebrew needs a password for a cask, the app pauses and shows **Open Terminal to Finish**.
 
+The menu also includes:
+
+- **Launch at Login** to start the app after reboot.
+- **Check Frequency** for hourly, every 6 hours, daily, or manual-only checks.
+- **Quiet Hours (10 PM-8 AM)** to pause background auto-updates overnight.
+- **Run Cleanup After Updates** for optional `brew cleanup`.
+- **Notify on Completion** for macOS notifications when updates finish or need attention.
+- **Ignored Packages** for packages you want excluded from auto-update and update-all.
+- **Update History**, **Last checked**, **Last updated**, and **Brew Doctor** status.
+
 When an update leaves everything current, the beer icon plays a quick cheers animation. **Play Cheers Sound** is enabled by default for new installs; turn it off from the menu if you prefer a silent success state.
 
 Some casks uninstall or replace files with `sudo`, which requires an interactive password prompt. In that case the app shows **Open Terminal to Finish** so Homebrew can ask for your password in Terminal. When Terminal finishes, return to the app and choose **Refresh**.
