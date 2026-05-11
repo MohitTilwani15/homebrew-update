@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var specificUpdateItem: NSMenuItem!
     private var stopItem: NSMenuItem!
     private var terminalItem: NSMenuItem!
+    private var autoUpdateItem: NSMenuItem!
     private var cheersSoundItem: NSMenuItem!
     private var checkTimer: Timer?
     private var cheersTimer: Timer?
@@ -34,8 +35,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         get { UserDefaults.standard.bool(forKey: "playsCheersSound") }
         set { UserDefaults.standard.set(newValue, forKey: "playsCheersSound") }
     }
+    private var automaticallyUpdatesPackages: Bool {
+        get { UserDefaults.standard.bool(forKey: "automaticallyUpdatesPackages") }
+        set { UserDefaults.standard.set(newValue, forKey: "automaticallyUpdatesPackages") }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.register(defaults: [
+            "playsCheersSound": true,
+            "automaticallyUpdatesPackages": false
+        ])
         NSApp.setActivationPolicy(.accessory)
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -60,6 +69,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         terminalItem.image = MenuIcon.terminal
         terminalItem.isHidden = true
         terminalItem.isEnabled = false
+        autoUpdateItem = NSMenuItem(title: "Auto Update in Background", action: #selector(toggleAutomaticUpdates), keyEquivalent: "")
+        autoUpdateItem.target = self
+        autoUpdateItem.image = MenuIcon.automaticUpdate
+        autoUpdateItem.state = automaticallyUpdatesPackages ? .on : .off
         cheersSoundItem = NSMenuItem(title: "Play Cheers Sound", action: #selector(toggleCheersSound), keyEquivalent: "")
         cheersSoundItem.target = self
         cheersSoundItem.image = MenuIcon.sound
@@ -73,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(stopItem)
         menu.addItem(terminalItem)
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(autoUpdateItem)
         menu.addItem(cheersSoundItem)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
@@ -153,6 +167,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cheersSoundItem.state = playsCheersSound ? .on : .off
     }
 
+    @objc private func toggleAutomaticUpdates() {
+        automaticallyUpdatesPackages.toggle()
+        autoUpdateItem.state = automaticallyUpdatesPackages ? .on : .off
+
+        if automaticallyUpdatesPackages, !isUpdating {
+            checkForOutdatedPackages()
+        }
+    }
+
     private func checkForOutdatedPackages() {
         guard !isUpdating else { return }
 
@@ -172,7 +195,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         }
                     } else {
                         self.celebrateAfterNextCurrentCheck = false
-                        self.render(.outdated(packages))
+                        if self.automaticallyUpdatesPackages {
+                            self.beginUpdate(packages: packages, showsPackageNames: false)
+                        } else {
+                            self.render(.outdated(packages))
+                        }
                     }
                 case .failure(let error):
                     self.celebrateAfterNextCurrentCheck = false
@@ -814,6 +841,7 @@ private enum MenuIcon {
     static let cask = symbol("app")
     static let stop = symbol("stop.circle")
     static let terminal = symbol("terminal")
+    static let automaticUpdate = symbol("clock.arrow.circlepath")
     static let sound = symbol("speaker.wave.2")
 
     private static func symbol(_ name: String) -> NSImage? {
