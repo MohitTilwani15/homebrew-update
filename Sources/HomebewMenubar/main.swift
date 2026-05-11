@@ -1,6 +1,9 @@
 import Cocoa
 import ServiceManagement
 import UserNotifications
+#if ENABLE_SPARKLE
+import Sparkle
+#endif
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private enum State {
@@ -30,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cheersSoundItem: NSMenuItem!
     private var lastCheckedItem: NSMenuItem!
     private var historyItem: NSMenuItem!
+    private var appUpdateItem: NSMenuItem!
     private var checkTimer: Timer?
     private var cheersTimer: Timer?
     private var settingsWindow: NSWindow?
@@ -49,6 +53,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeUpdateStartedAutomatically = false
     private var terminalCommand: String?
     private var celebrateAfterNextCurrentCheck = false
+#if ENABLE_SPARKLE
+    private var updaterController: SPUStandardUpdaterController?
+#endif
     private var playsCheersSound: Bool {
         get { UserDefaults.standard.bool(forKey: "playsCheersSound") }
         set { UserDefaults.standard.set(newValue, forKey: "playsCheersSound") }
@@ -120,6 +127,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         settingsItem.image = MenuIcon.settings
+        appUpdateItem = NSMenuItem(title: appUpdateTitle, action: #selector(checkForAppUpdates), keyEquivalent: "")
+        appUpdateItem.target = self
+        appUpdateItem.image = MenuIcon.appUpdate
+        appUpdateItem.isEnabled = appUpdateIsEnabled
         autoUpdateItem = NSMenuItem(title: "Auto Update in Background", action: #selector(toggleAutomaticUpdates), keyEquivalent: "")
         autoUpdateItem.target = self
         autoUpdateItem.image = MenuIcon.automaticUpdate
@@ -160,10 +171,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(lastCheckedItem)
         menu.addItem(historyItem)
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(appUpdateItem)
         menu.addItem(settingsItem)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
 
+        setupAppUpdater()
         render(.checking)
         checkForOutdatedPackages()
         scheduleCheckTimer()
@@ -317,6 +330,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationsItem.state = sendsNotifications ? .on : .off
         requestNotificationPermissionIfNeeded()
         refreshSettingsControls()
+    }
+
+    @objc private func checkForAppUpdates() {
+        if isInstalledByHomebrew {
+            TerminalLauncher.open(command: "brew update && brew upgrade --cask homebew-menubar")
+            return
+        }
+
+#if ENABLE_SPARKLE
+        updaterController?.checkForUpdates(nil)
+#endif
     }
 
     @objc private func settingsToggleAutomaticUpdates() {
@@ -752,6 +776,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         return menu
+    }
+
+    private func setupAppUpdater() {
+        appUpdateItem.title = appUpdateTitle
+        appUpdateItem.isEnabled = appUpdateIsEnabled
+
+        guard !isInstalledByHomebrew else { return }
+#if ENABLE_SPARKLE
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
+#endif
+    }
+
+    private var appUpdateTitle: String {
+        if isInstalledByHomebrew {
+            return "Update App with Homebrew"
+        }
+
+#if ENABLE_SPARKLE
+        return "Check for App Updates..."
+#else
+        return "App Updates Unavailable"
+#endif
+    }
+
+    private var appUpdateIsEnabled: Bool {
+        if isInstalledByHomebrew {
+            return true
+        }
+
+#if ENABLE_SPARKLE
+        return true
+#else
+        return false
+#endif
+    }
+
+    private var isInstalledByHomebrew: Bool {
+        let bundlePath = Bundle.main.bundleURL.resolvingSymlinksInPath().path
+        return bundlePath.contains("/Caskroom/homebew-menubar/")
     }
 }
 
@@ -1263,6 +1330,7 @@ private enum MenuIcon {
     static let checked = symbol("checkmark.circle")
     static let updated = symbol("checkmark.seal")
     static let history = symbol("clock")
+    static let appUpdate = symbol("arrow.down.circle")
 
     private static func symbol(_ name: String) -> NSImage? {
         let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
