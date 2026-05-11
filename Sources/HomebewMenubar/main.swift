@@ -25,7 +25,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var autoUpdateItem: NSMenuItem!
     private var launchAtLoginItem: NSMenuItem!
     private var updateFrequencyItem: NSMenuItem!
-    private var quietHoursItem: NSMenuItem!
     private var cleanupItem: NSMenuItem!
     private var notificationsItem: NSMenuItem!
     private var cheersSoundItem: NSMenuItem!
@@ -39,7 +38,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var settingsAutoUpdateButton: NSButton?
     private var settingsLaunchAtLoginButton: NSButton?
-    private var settingsQuietHoursButton: NSButton?
     private var settingsCleanupButton: NSButton?
     private var settingsNotificationsButton: NSButton?
     private var settingsCheersSoundButton: NSButton?
@@ -71,10 +69,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         get { UpdateFrequency(rawValue: UserDefaults.standard.string(forKey: "updateFrequency") ?? "") ?? .hourly }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "updateFrequency") }
     }
-    private var quietHoursEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "quietHoursEnabled") }
-        set { UserDefaults.standard.set(newValue, forKey: "quietHoursEnabled") }
-    }
     private var runsCleanupAfterUpdates: Bool {
         get { UserDefaults.standard.bool(forKey: "runsCleanupAfterUpdates") }
         set { UserDefaults.standard.set(newValue, forKey: "runsCleanupAfterUpdates") }
@@ -98,13 +92,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchAtLoginEnabled: Bool {
         SMAppService.mainApp.status == .enabled
     }
-    private var isInQuietHours: Bool {
-        guard quietHoursEnabled else { return false }
-        let hour = Calendar.current.component(.hour, from: Date())
-        return hour >= 22 || hour < 8
-    }
     private var shouldAutoUpdateNow: Bool {
-        automaticallyUpdatesPackages && updateFrequency != .manual && !isInQuietHours
+        automaticallyUpdatesPackages && updateFrequency != .manual
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -112,7 +101,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "playsCheersSound": true,
             "automaticallyUpdatesPackages": true,
             "updateFrequency": UpdateFrequency.hourly.rawValue,
-            "quietHoursEnabled": true,
             "runsCleanupAfterUpdates": false,
             "sendsNotifications": true
         ])
@@ -155,10 +143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateFrequencyItem = NSMenuItem(title: "Check Frequency", action: nil, keyEquivalent: "")
         updateFrequencyItem.image = MenuIcon.frequency
         updateFrequencyItem.submenu = updateFrequencySubmenu()
-        quietHoursItem = NSMenuItem(title: "Quiet Hours (10 PM-8 AM)", action: #selector(toggleQuietHours), keyEquivalent: "")
-        quietHoursItem.target = self
-        quietHoursItem.image = MenuIcon.quietHours
-        quietHoursItem.state = quietHoursEnabled ? .on : .off
         cleanupItem = NSMenuItem(title: "Run Cleanup After Updates", action: #selector(toggleCleanupAfterUpdates), keyEquivalent: "")
         cleanupItem.target = self
         cleanupItem.image = MenuIcon.cleanup
@@ -346,12 +330,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshSettingsControls()
     }
 
-    @objc private func toggleQuietHours() {
-        quietHoursEnabled.toggle()
-        quietHoursItem.state = quietHoursEnabled ? .on : .off
-        refreshSettingsControls()
-    }
-
     @objc private func toggleCleanupAfterUpdates() {
         runsCleanupAfterUpdates.toggle()
         cleanupItem.state = runsCleanupAfterUpdates ? .on : .off
@@ -397,10 +375,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func settingsToggleLaunchAtLogin() {
         toggleLaunchAtLogin()
-    }
-
-    @objc private func settingsToggleQuietHours() {
-        toggleQuietHours()
     }
 
     @objc private func settingsToggleCleanupAfterUpdates() {
@@ -458,8 +432,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let automationSection = sectionTitle("Automation")
         settingsAutoUpdateButton = checkbox(title: "Auto update packages in the background", action: #selector(settingsToggleAutomaticUpdates))
         settingsLaunchAtLoginButton = checkbox(title: "Launch at login", action: #selector(settingsToggleLaunchAtLogin))
-        settingsQuietHoursButton = checkbox(title: "Quiet hours from 10 PM to 8 AM", action: #selector(settingsToggleQuietHours))
-
         let frequencyRow = NSStackView()
         frequencyRow.orientation = .horizontal
         frequencyRow.alignment = .centerY
@@ -499,7 +471,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             automationSection,
             settingsAutoUpdateButton,
             settingsLaunchAtLoginButton,
-            settingsQuietHoursButton,
             frequencyRow,
             separator(),
             behaviorSection,
@@ -527,7 +498,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshSettingsControls() {
         settingsAutoUpdateButton?.state = automaticallyUpdatesPackages ? .on : .off
         settingsLaunchAtLoginButton?.state = launchAtLoginEnabled ? .on : .off
-        settingsQuietHoursButton?.state = quietHoursEnabled ? .on : .off
         settingsCleanupButton?.state = runsCleanupAfterUpdates ? .on : .off
         settingsNotificationsButton?.state = sendsNotifications ? .on : .off
         settingsCheersSoundButton?.state = playsCheersSound ? .on : .off
@@ -760,7 +730,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .outdated(let packages):
             statusItem.button?.image = BeerIcon.image(fillLevel: 0.08)
             statusItem.button?.toolTip = "\(packages.count) Homebrew package\(packages.count == 1 ? "" : "s") need updating"
-            packageItem.title = automaticallyUpdatesPackages && isInQuietHours ? "Quiet hours. \(packageSummary(packages))" : packageSummary(packages)
+            packageItem.title = packageSummary(packages)
             refreshItem.isEnabled = true
             refreshItem.title = packages.count == 1 ? "Update Package" : "Update All Packages"
             refreshItem.image = MenuIcon.refresh
@@ -1467,7 +1437,6 @@ private enum MenuIcon {
     static let automaticUpdate = symbol("clock.arrow.circlepath")
     static let login = symbol("power")
     static let frequency = symbol("timer")
-    static let quietHours = symbol("moon")
     static let cleanup = symbol("trash")
     static let notification = symbol("bell")
     static let sound = symbol("speaker.wave.2")

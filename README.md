@@ -30,7 +30,6 @@ Open **Settings...** or press `Command + ,` for preferences:
 
 - **Launch at Login** to start the app after reboot.
 - **Check Frequency** for hourly, every 6 hours, daily, or manual-only checks.
-- **Quiet Hours (10 PM-8 AM)** to pause background auto-updates overnight.
 - **Run Cleanup After Updates** for optional `brew cleanup`.
 - **Notify on Completion** for macOS notifications when updates finish or need attention.
 - **Play Cheers Sound** for the success sound.
