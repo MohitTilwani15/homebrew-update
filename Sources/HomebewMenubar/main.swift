@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var packageItem: NSMenuItem!
     private var refreshItem: NSMenuItem!
+    private var specificUpdateItem: NSMenuItem!
     private var stopItem: NSMenuItem!
     private var terminalItem: NSMenuItem!
     private var checkTimer: Timer?
@@ -23,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeOperation: BrewUpdateOperation?
     private var latestProgress = UpdateProgress(percent: 0, message: "Starting update...")
     private var lastOutdatedPackages: [BrewPackage] = []
+    private var packageByMenuTag: [Int: BrewPackage] = [:]
+    private var nextPackageMenuTag = 1_000
     private var terminalCommand: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -36,6 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshAndUpgrade), keyEquivalent: "r")
         refreshItem.target = self
         refreshItem.image = MenuIcon.refresh
+        specificUpdateItem = NSMenuItem(title: "Update One Package", action: nil, keyEquivalent: "")
+        specificUpdateItem.image = MenuIcon.packageList
+        specificUpdateItem.isHidden = true
+        specificUpdateItem.isEnabled = false
         stopItem = NSMenuItem(title: "Stop Update", action: #selector(stopUpdate), keyEquivalent: ".")
         stopItem.target = self
         stopItem.image = MenuIcon.stop
@@ -51,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(packageItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(refreshItem)
+        menu.addItem(specificUpdateItem)
         menu.addItem(stopItem)
         menu.addItem(terminalItem)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -70,12 +78,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshAndUpgrade() {
         guard !isUpdating else { return }
+        beginUpdate(packages: lastOutdatedPackages)
+    }
 
+    @objc private func updateSpecificPackage(_ sender: NSMenuItem) {
+        guard !isUpdating else { return }
+        guard let package = packageByMenuTag[sender.tag] else { return }
+        beginUpdate(packages: [package])
+    }
+
+    private func beginUpdate(packages: [BrewPackage]) {
         isUpdating = true
         latestProgress = UpdateProgress(percent: 0, message: "Starting update...")
         render(.updating(latestProgress))
 
-        activeOperation = checker.updateAllPackages(packages: lastOutdatedPackages) { [weak self] progress in
+        activeOperation = checker.updatePackages(packages: packages) { [weak self] progress in
             DispatchQueue.main.async {
                 guard let self, self.isUpdating else { return }
                 self.latestProgress = progress
@@ -152,6 +169,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = false
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
+            specificUpdateItem.isHidden = true
+            specificUpdateItem.isEnabled = false
             stopItem.isHidden = true
             stopItem.isEnabled = false
             terminalItem.isHidden = true
@@ -163,6 +182,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = true
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
+            specificUpdateItem.isHidden = true
+            specificUpdateItem.isEnabled = false
             stopItem.isHidden = true
             stopItem.isEnabled = false
             terminalItem.isHidden = true
@@ -172,8 +193,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.button?.toolTip = "\(packages.count) Homebrew package\(packages.count == 1 ? "" : "s") need updating"
             packageItem.title = packageSummary(packages)
             refreshItem.isEnabled = true
-            refreshItem.title = "Update Packages"
+            refreshItem.title = packages.count == 1 ? "Update Package" : "Update All Packages"
             refreshItem.image = MenuIcon.refresh
+            specificUpdateItem.isHidden = packages.isEmpty
+            specificUpdateItem.isEnabled = !packages.isEmpty
+            specificUpdateItem.submenu = packageSubmenu(for: packages)
             stopItem.isHidden = true
             stopItem.isEnabled = false
             terminalItem.isHidden = true
@@ -185,6 +209,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = false
             refreshItem.title = "Updating \(progress.percent)%"
             refreshItem.image = MenuIcon.updating
+            specificUpdateItem.isHidden = true
+            specificUpdateItem.isEnabled = false
             stopItem.isHidden = false
             stopItem.isEnabled = true
             terminalItem.isHidden = true
@@ -196,6 +222,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = true
             refreshItem.title = "Try Again"
             refreshItem.image = MenuIcon.refresh
+            specificUpdateItem.isHidden = true
+            specificUpdateItem.isEnabled = false
             stopItem.isHidden = true
             stopItem.isEnabled = false
             terminalItem.isHidden = true
@@ -208,6 +236,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = true
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
+            specificUpdateItem.isHidden = lastOutdatedPackages.isEmpty
+            specificUpdateItem.isEnabled = !lastOutdatedPackages.isEmpty
+            specificUpdateItem.submenu = packageSubmenu(for: lastOutdatedPackages)
             stopItem.isHidden = true
             stopItem.isEnabled = false
             terminalItem.isHidden = false
@@ -219,6 +250,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = true
             refreshItem.title = "Try Again"
             refreshItem.image = MenuIcon.refresh
+            specificUpdateItem.isHidden = lastOutdatedPackages.isEmpty
+            specificUpdateItem.isEnabled = !lastOutdatedPackages.isEmpty
+            specificUpdateItem.submenu = packageSubmenu(for: lastOutdatedPackages)
             stopItem.isHidden = true
             stopItem.isEnabled = false
             terminalItem.isHidden = true
@@ -230,6 +264,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = false
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
+            specificUpdateItem.isHidden = true
+            specificUpdateItem.isEnabled = false
             stopItem.isHidden = true
             stopItem.isEnabled = false
             terminalItem.isHidden = true
@@ -244,6 +280,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         return "\(packages.count) packages need updating"
     }
+
+    private func packageSubmenu(for packages: [BrewPackage]) -> NSMenu {
+        let menu = NSMenu()
+        packageByMenuTag.removeAll()
+        nextPackageMenuTag = 1_000
+
+        let header = NSMenuItem(title: "Choose a package to update", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
+        menu.addItem(NSMenuItem.separator())
+
+        for package in packages {
+            let item = NSMenuItem(title: package.menuTitle, action: #selector(updateSpecificPackage(_:)), keyEquivalent: "")
+            item.target = self
+            item.image = package.kind == .cask ? MenuIcon.cask : MenuIcon.formula
+            item.toolTip = package.detailText
+            item.tag = nextPackageMenuTag
+            packageByMenuTag[item.tag] = package
+            nextPackageMenuTag += 1
+            menu.addItem(item)
+        }
+
+        return menu
+    }
 }
 
 private struct UpdateProgress {
@@ -255,10 +315,21 @@ private struct BrewPackage {
     enum Kind {
         case formula
         case cask
+
+        var label: String {
+            switch self {
+            case .formula:
+                return "Formula"
+            case .cask:
+                return "Cask"
+            }
+        }
     }
 
     let kind: Kind
     let name: String
+    let installedVersions: [String]
+    let currentVersion: String?
 
     var upgradeArguments: [String] {
         switch kind {
@@ -268,16 +339,37 @@ private struct BrewPackage {
             return ["upgrade", "--cask", name]
         }
     }
+
+    var menuTitle: String {
+        "\(name)  \(versionSummary)"
+    }
+
+    var detailText: String {
+        "\(kind.label) · \(versionSummary)"
+    }
+
+    private var versionSummary: String {
+        guard let currentVersion, !currentVersion.isEmpty else {
+            return kind.label
+        }
+
+        let installed = installedVersions.first ?? "installed"
+        return "\(installed) -> \(currentVersion)"
+    }
 }
 
 private struct BrewOutdatedSnapshot: Decodable {
     struct Formula: Decodable {
         let name: String
         let pinned: Bool?
+        let installed_versions: [String]?
+        let current_version: String?
     }
 
     struct Cask: Decodable {
         let name: String
+        let installed_versions: [String]?
+        let current_version: String?
     }
 
     let formulae: [Formula]
@@ -286,8 +378,22 @@ private struct BrewOutdatedSnapshot: Decodable {
     var upgradeablePackages: [BrewPackage] {
         let formulaPackages = formulae
             .filter { $0.pinned != true }
-            .map { BrewPackage(kind: .formula, name: $0.name) }
-        let caskPackages = casks.map { BrewPackage(kind: .cask, name: $0.name) }
+            .map {
+                BrewPackage(
+                    kind: .formula,
+                    name: $0.name,
+                    installedVersions: $0.installed_versions ?? [],
+                    currentVersion: $0.current_version
+                )
+            }
+        let caskPackages = casks.map {
+            BrewPackage(
+                kind: .cask,
+                name: $0.name,
+                installedVersions: $0.installed_versions ?? [],
+                currentVersion: $0.current_version
+            )
+        }
 
         return formulaPackages + caskPackages
     }
@@ -331,7 +437,7 @@ private final class BrewPackageService {
         }
     }
 
-    func updateAllPackages(
+    func updatePackages(
         packages: [BrewPackage],
         onProgress: @escaping (UpdateProgress) -> Void,
         completion: @escaping (Result<Void, Error>) -> Void
@@ -640,6 +746,9 @@ private final class BrewUpdateOperation {
 private enum MenuIcon {
     static let refresh = symbol("arrow.clockwise")
     static let updating = symbol("arrow.triangle.2.circlepath")
+    static let packageList = symbol("list.bullet")
+    static let formula = symbol("terminal")
+    static let cask = symbol("app")
     static let stop = symbol("stop.circle")
     static let terminal = symbol("terminal")
 

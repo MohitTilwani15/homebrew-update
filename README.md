@@ -16,6 +16,8 @@ brew upgrade --formula ...
 brew upgrade --cask ...
 ```
 
+When multiple packages are outdated, use **Update One Package** to choose a specific formula or cask. Each item shows the package name and version change in the menu, while the main status still stays count-based.
+
 The update menu also shows a **Stop Update** item while Homebrew is running. Choosing it sends an interrupt to the active `brew` process, then terminates it if it is still running after a short grace period.
 
 Some casks uninstall or replace files with `sudo`, which requires an interactive password prompt. In that case the app shows **Open Terminal to Finish** so Homebrew can ask for your password in Terminal. When Terminal finishes, return to the app and choose **Refresh**.
