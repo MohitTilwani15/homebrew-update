@@ -20,7 +20,7 @@ When multiple packages are outdated, use **Update One Package** to choose a spec
 
 The update menu also shows a **Stop Update** item while Homebrew is running. Choosing it sends an interrupt to the active `brew` process, then terminates it if it is still running after a short grace period.
 
-Enable **Auto Update in Background** to let the app automatically upgrade outdated packages during its periodic checks. If Homebrew needs a password for a cask, the app pauses and shows **Open Terminal to Finish**.
+**Auto Update in Background** is enabled by default, so the app automatically upgrades outdated packages during its periodic checks. Turn it off from the menu if you prefer manual updates. If Homebrew needs a password for a cask, the app pauses and shows **Open Terminal to Finish**.
 
 When an update leaves everything current, the beer icon plays a quick cheers animation. **Play Cheers Sound** is enabled by default for new installs; turn it off from the menu if you prefer a silent success state.
 
