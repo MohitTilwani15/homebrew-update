@@ -33,7 +33,6 @@ Open **Settings...** or press `Command + ,` for preferences:
 - **Run Cleanup After Updates** for optional `brew cleanup`.
 - **Notify on Completion** for macOS notifications when updates finish or need attention.
 - **Play Cheers Sound** for the success sound.
-- **Ignored Packages** for packages you want excluded from auto-update and update-all.
 
 When an update leaves everything current, the beer icon plays a quick cheers animation. **Play Cheers Sound** is enabled by default for new installs; turn it off from the menu if you prefer a silent success state.
 

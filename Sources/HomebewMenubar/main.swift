@@ -28,7 +28,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cleanupItem: NSMenuItem!
     private var notificationsItem: NSMenuItem!
     private var cheersSoundItem: NSMenuItem!
-    private var ignoredPackagesItem: NSMenuItem!
     private var lastCheckedItem: NSMenuItem!
     private var historyItem: NSMenuItem!
     private var checkTimer: Timer?
@@ -40,16 +39,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsNotificationsButton: NSButton?
     private var settingsCheersSoundButton: NSButton?
     private var settingsFrequencyPopUp: NSPopUpButton?
-    private var settingsIgnoredPopUp: NSPopUpButton?
-    private var settingsUnignoreButton: NSButton?
     private var isUpdating = false
     private var activeOperation: BrewUpdateOperation?
     private var latestProgress = UpdateProgress(percent: 0, message: "Starting update...")
     private var lastOutdatedPackages: [BrewPackage] = []
-    private var visibleOutdatedPackages: [BrewPackage] = []
     private var packageByMenuTag: [Int: BrewPackage] = [:]
-    private var ignorePackageByMenuTag: [Int: BrewPackage] = [:]
-    private var unignorePackageByMenuTag: [Int: String] = [:]
     private var frequencyByMenuTag: [Int: UpdateFrequency] = [:]
     private var nextPackageMenuTag = 1_000
     private var activeUpdateStartedAutomatically = false
@@ -74,10 +68,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sendsNotifications: Bool {
         get { UserDefaults.standard.bool(forKey: "sendsNotifications") }
         set { UserDefaults.standard.set(newValue, forKey: "sendsNotifications") }
-    }
-    private var ignoredPackageNames: Set<String> {
-        get { Set(UserDefaults.standard.stringArray(forKey: "ignoredPackageNames") ?? []) }
-        set { UserDefaults.standard.set(Array(newValue).sorted(), forKey: "ignoredPackageNames") }
     }
     private var updateHistory: [String] {
         get { UserDefaults.standard.stringArray(forKey: "updateHistory") ?? [] }
@@ -153,9 +143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cheersSoundItem.target = self
         cheersSoundItem.image = MenuIcon.sound
         cheersSoundItem.state = playsCheersSound ? .on : .off
-        ignoredPackagesItem = NSMenuItem(title: "Ignored Packages", action: nil, keyEquivalent: "")
-        ignoredPackagesItem.image = MenuIcon.ignored
-        ignoredPackagesItem.submenu = ignoredPackagesSubmenu()
         lastCheckedItem = NSMenuItem(title: lastCheckedTitle, action: nil, keyEquivalent: "")
         lastCheckedItem.image = MenuIcon.checked
         historyItem = NSMenuItem(title: "Update History", action: nil, keyEquivalent: "")
@@ -207,8 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshAndUpgrade() {
         guard !isUpdating else { return }
-        let packages = visibleOutdatedPackages.isEmpty ? actionablePackages(from: lastOutdatedPackages) : visibleOutdatedPackages
-        beginUpdate(packages: packages, showsPackageNames: false)
+        beginUpdate(packages: lastOutdatedPackages, showsPackageNames: false)
     }
 
     @objc private func updateSpecificPackage(_ sender: NSMenuItem) {
@@ -333,28 +319,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshSettingsControls()
     }
 
-    @objc private func ignorePackage(_ sender: NSMenuItem) {
-        guard let package = ignorePackageByMenuTag[sender.tag] else { return }
-        var ignored = ignoredPackageNames
-        ignored.insert(package.name)
-        ignoredPackageNames = ignored
-        visibleOutdatedPackages = actionablePackages(from: lastOutdatedPackages)
-        ignoredPackagesItem.submenu = ignoredPackagesSubmenu()
-        refreshSettingsControls()
-        render(visibleOutdatedPackages.isEmpty ? .current : .outdated(visibleOutdatedPackages))
-    }
-
-    @objc private func unignorePackage(_ sender: NSMenuItem) {
-        guard let packageName = unignorePackageByMenuTag[sender.tag] else { return }
-        var ignored = ignoredPackageNames
-        ignored.remove(packageName)
-        ignoredPackageNames = ignored
-        visibleOutdatedPackages = actionablePackages(from: lastOutdatedPackages)
-        ignoredPackagesItem.submenu = ignoredPackagesSubmenu()
-        refreshSettingsControls()
-        render(visibleOutdatedPackages.isEmpty ? .current : .outdated(visibleOutdatedPackages))
-    }
-
     @objc private func settingsToggleAutomaticUpdates() {
         toggleAutomaticUpdates()
     }
@@ -382,17 +346,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateFrequencyItem.submenu = updateFrequencySubmenu()
         scheduleCheckTimer()
         refreshSettingsControls()
-    }
-
-    @objc private func settingsUnignoreSelectedPackage() {
-        guard let packageName = settingsIgnoredPopUp?.selectedItem?.representedObject as? String else { return }
-        var ignored = ignoredPackageNames
-        ignored.remove(packageName)
-        ignoredPackageNames = ignored
-        visibleOutdatedPackages = actionablePackages(from: lastOutdatedPackages)
-        ignoredPackagesItem.submenu = ignoredPackagesSubmenu()
-        refreshSettingsControls()
-        render(visibleOutdatedPackages.isEmpty ? .current : .outdated(visibleOutdatedPackages))
     }
 
     private func makeSettingsWindow() -> NSWindow {
@@ -437,22 +390,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsNotificationsButton = checkbox(title: "Notify when updates finish or need attention", action: #selector(settingsToggleNotifications))
         settingsCheersSoundButton = checkbox(title: "Play cheers sound after successful updates", action: #selector(settingsToggleCheersSound))
 
-        let ignoredSection = sectionTitle("Ignored Packages")
-        let ignoredHelp = mutedLabel("Ignored packages are skipped by auto-update and Update All.")
-        let ignoredRow = NSStackView()
-        ignoredRow.orientation = .horizontal
-        ignoredRow.alignment = .centerY
-        ignoredRow.spacing = 8
-        settingsIgnoredPopUp = NSPopUpButton()
-        settingsIgnoredPopUp?.widthAnchor.constraint(equalToConstant: 260).isActive = true
-        settingsUnignoreButton = NSButton(title: "Stop Ignoring", target: self, action: #selector(settingsUnignoreSelectedPackage))
-        if let settingsIgnoredPopUp {
-            ignoredRow.addArrangedSubview(settingsIgnoredPopUp)
-        }
-        if let settingsUnignoreButton {
-            ignoredRow.addArrangedSubview(settingsUnignoreButton)
-        }
-
         [
             automationSection,
             settingsAutoUpdateButton,
@@ -462,11 +399,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             behaviorSection,
             settingsCleanupButton,
             settingsNotificationsButton,
-            settingsCheersSoundButton,
-            separator(),
-            ignoredSection,
-            ignoredHelp,
-            ignoredRow
+            settingsCheersSoundButton
         ].compactMap { $0 }.forEach(stack.addArrangedSubview)
 
         contentView.addSubview(stack)
@@ -495,20 +428,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         settingsFrequencyPopUp?.selectItem(withTitle: updateFrequency.title)
 
-        settingsIgnoredPopUp?.removeAllItems()
-        let ignored = ignoredPackageNames.sorted()
-        if ignored.isEmpty {
-            settingsIgnoredPopUp?.addItem(withTitle: "No ignored packages")
-            settingsIgnoredPopUp?.isEnabled = false
-            settingsUnignoreButton?.isEnabled = false
-        } else {
-            settingsIgnoredPopUp?.isEnabled = true
-            settingsUnignoreButton?.isEnabled = true
-            for packageName in ignored {
-                settingsIgnoredPopUp?.addItem(withTitle: packageName)
-                settingsIgnoredPopUp?.lastItem?.representedObject = packageName
-            }
-        }
     }
 
     private func sectionTitle(_ title: String) -> NSTextField {
@@ -554,12 +473,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.lastCheckedAt = Date()
                     self.updateStatusMenuItems()
                     self.lastOutdatedPackages = packages
-                    self.visibleOutdatedPackages = self.actionablePackages(from: packages)
-                    if self.visibleOutdatedPackages.isEmpty {
+                    if packages.isEmpty {
                         self.render(.current)
-                        if !packages.isEmpty {
-                            self.packageItem.title = "Only ignored packages are outdated"
-                        }
                         if self.celebrateAfterNextCurrentCheck {
                             self.celebrateAfterNextCurrentCheck = false
                             self.startCheersAnimation()
@@ -567,9 +482,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     } else {
                         self.celebrateAfterNextCurrentCheck = false
                         if self.shouldAutoUpdateNow {
-                            self.beginUpdate(packages: self.visibleOutdatedPackages, showsPackageNames: false, startedAutomatically: true)
+                            self.beginUpdate(packages: packages, showsPackageNames: false, startedAutomatically: true)
                         } else {
-                            self.render(.outdated(self.visibleOutdatedPackages))
+                            self.render(.outdated(packages))
                         }
                     }
                 case .failure(let error):
@@ -584,11 +499,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-    }
-
-    private func actionablePackages(from packages: [BrewPackage]) -> [BrewPackage] {
-        let ignored = ignoredPackageNames
-        return packages.filter { !ignored.contains($0.name) }
     }
 
     private func scheduleCheckTimer() {
@@ -738,9 +648,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = true
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
-            specificUpdateItem.isHidden = visibleOutdatedPackages.isEmpty
-            specificUpdateItem.isEnabled = !visibleOutdatedPackages.isEmpty
-            specificUpdateItem.submenu = packageSubmenu(for: visibleOutdatedPackages)
+            specificUpdateItem.isHidden = lastOutdatedPackages.isEmpty
+            specificUpdateItem.isEnabled = !lastOutdatedPackages.isEmpty
+            specificUpdateItem.submenu = packageSubmenu(for: lastOutdatedPackages)
             stopItem.isHidden = true
             stopItem.isEnabled = false
             terminalItem.isHidden = false
@@ -752,9 +662,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = true
             refreshItem.title = "Try Again"
             refreshItem.image = MenuIcon.refresh
-            specificUpdateItem.isHidden = visibleOutdatedPackages.isEmpty
-            specificUpdateItem.isEnabled = !visibleOutdatedPackages.isEmpty
-            specificUpdateItem.submenu = packageSubmenu(for: visibleOutdatedPackages)
+            specificUpdateItem.isHidden = lastOutdatedPackages.isEmpty
+            specificUpdateItem.isEnabled = !lastOutdatedPackages.isEmpty
+            specificUpdateItem.submenu = packageSubmenu(for: lastOutdatedPackages)
             stopItem.isHidden = true
             stopItem.isEnabled = false
             terminalItem.isHidden = true
@@ -786,7 +696,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func packageSubmenu(for packages: [BrewPackage]) -> NSMenu {
         let menu = NSMenu()
         packageByMenuTag.removeAll()
-        ignorePackageByMenuTag.removeAll()
         nextPackageMenuTag = 1_000
 
         let header = NSMenuItem(title: "Choose a package to update", action: nil, keyEquivalent: "")
@@ -801,45 +710,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.toolTip = package.detailText
             item.tag = nextPackageMenuTag
             packageByMenuTag[item.tag] = package
-            nextPackageMenuTag += 1
-            menu.addItem(item)
-        }
-
-        menu.addItem(NSMenuItem.separator())
-        let ignoreHeader = NSMenuItem(title: "Ignore from auto-update", action: nil, keyEquivalent: "")
-        ignoreHeader.isEnabled = false
-        menu.addItem(ignoreHeader)
-        for package in packages {
-            let item = NSMenuItem(title: package.name, action: #selector(ignorePackage(_:)), keyEquivalent: "")
-            item.target = self
-            item.image = MenuIcon.ignored
-            item.tag = nextPackageMenuTag
-            ignorePackageByMenuTag[item.tag] = package
-            nextPackageMenuTag += 1
-            menu.addItem(item)
-        }
-
-        return menu
-    }
-
-    private func ignoredPackagesSubmenu() -> NSMenu {
-        let menu = NSMenu()
-        unignorePackageByMenuTag.removeAll()
-        let ignored = ignoredPackageNames.sorted()
-
-        guard !ignored.isEmpty else {
-            let item = NSMenuItem(title: "No ignored packages", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-            return menu
-        }
-
-        for packageName in ignored {
-            let item = NSMenuItem(title: "Stop ignoring \(packageName)", action: #selector(unignorePackage(_:)), keyEquivalent: "")
-            item.target = self
-            item.image = MenuIcon.unignored
-            item.tag = nextPackageMenuTag
-            unignorePackageByMenuTag[item.tag] = packageName
             nextPackageMenuTag += 1
             menu.addItem(item)
         }
@@ -1390,8 +1260,6 @@ private enum MenuIcon {
     static let cleanup = symbol("trash")
     static let notification = symbol("bell")
     static let sound = symbol("speaker.wave.2")
-    static let ignored = symbol("eye.slash")
-    static let unignored = symbol("eye")
     static let checked = symbol("checkmark.circle")
     static let updated = symbol("checkmark.seal")
     static let history = symbol("clock")
