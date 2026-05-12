@@ -9,6 +9,7 @@ Homebew Menubar sits in the menu bar, checks Homebrew for outdated formulae and 
 - Native macOS menu bar app built with Swift and AppKit.
 - Beer glass status icon for current, outdated, checking, and updating states.
 - Background auto-update enabled by default.
+- Configurable minimum package age before background auto-update.
 - Update all packages or choose one outdated package from the menu.
 - Count-based progress for update-all, package-name progress for single-package updates.
 - Stop an active update from the menu.
@@ -40,6 +41,21 @@ brew upgrade --cask ...
 
 After an update finishes, the app checks Homebrew again and returns the beer glass to full when no updates remain.
 
+## Minimum Package Age
+
+Homebew Menubar can delay background auto-updates until an available update has been observed for a minimum age. This helps reduce the blast radius of compromised or accidentally broken package releases by avoiding immediate automatic installation.
+
+The default delay is **1 day**. Available options are:
+
+- No delay.
+- 1 day.
+- 3 days.
+- 7 days.
+
+This is based on when Homebew Menubar first sees that specific package/version as outdated, because Homebrew does not expose a reliable upstream release timestamp for every formula and cask in the regular outdated check.
+
+Manual updates are still immediate. If you click **Update All Packages** or choose a specific package, the app treats that as an explicit override.
+
 ## Password-Required Casks
 
 Some casks uninstall or replace files with `sudo`, which requires an interactive password prompt. Menu bar apps do not have a terminal attached, so Homebew Menubar does not try to collect passwords itself.
@@ -55,6 +71,7 @@ Settings include:
 - Auto update in background.
 - Launch at login.
 - Check frequency.
+- Minimum package age before auto-update.
 - Run cleanup after updates.
 - Notifications.
 - Cheers sound.

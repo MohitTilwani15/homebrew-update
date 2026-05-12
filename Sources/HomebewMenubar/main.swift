@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var specificUpdateItem: NSMenuItem!
     private var stopItem: NSMenuItem!
     private var terminalItem: NSMenuItem!
+    private var ageGuardItem: NSMenuItem!
     private var settingsItem: NSMenuItem!
     private var autoUpdateItem: NSMenuItem!
     private var launchAtLoginItem: NSMenuItem!
@@ -43,10 +44,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsNotificationsButton: NSButton?
     private var settingsCheersSoundButton: NSButton?
     private var settingsFrequencyPopUp: NSPopUpButton?
+    private var settingsMinimumPackageAgePopUp: NSPopUpButton?
     private var isUpdating = false
     private var activeOperation: BrewUpdateOperation?
     private var latestProgress = UpdateProgress(percent: 0, message: "Starting update...")
     private var lastOutdatedPackages: [BrewPackage] = []
+    private let observedOutdatedPackageFirstSeenKey = "observedOutdatedPackageFirstSeen"
     private var packageByMenuTag: [Int: BrewPackage] = [:]
     private var frequencyByMenuTag: [Int: UpdateFrequency] = [:]
     private var nextPackageMenuTag = 1_000
@@ -68,6 +71,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         get { UpdateFrequency(rawValue: UserDefaults.standard.string(forKey: "updateFrequency") ?? "") ?? .hourly }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "updateFrequency") }
     }
+    private var minimumPackageAge: MinimumPackageAge {
+        get { MinimumPackageAge(rawValue: UserDefaults.standard.string(forKey: "minimumPackageAge") ?? "") ?? .oneDay }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "minimumPackageAge") }
+    }
     private var runsCleanupAfterUpdates: Bool {
         get { UserDefaults.standard.bool(forKey: "runsCleanupAfterUpdates") }
         set { UserDefaults.standard.set(newValue, forKey: "runsCleanupAfterUpdates") }
@@ -84,6 +91,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         get { UserDefaults.standard.object(forKey: "lastCheckedAt") as? Date }
         set { UserDefaults.standard.set(newValue, forKey: "lastCheckedAt") }
     }
+    private var observedOutdatedPackageFirstSeen: [String: TimeInterval] {
+        get {
+            let stored = UserDefaults.standard.dictionary(forKey: observedOutdatedPackageFirstSeenKey) ?? [:]
+            return stored.compactMapValues { value in
+                if let number = value as? NSNumber {
+                    return number.doubleValue
+                }
+                return value as? TimeInterval
+            }
+        }
+        set { UserDefaults.standard.set(newValue, forKey: observedOutdatedPackageFirstSeenKey) }
+    }
     private var launchAtLoginEnabled: Bool {
         SMAppService.mainApp.status == .enabled
     }
@@ -96,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "playsCheersSound": true,
             "automaticallyUpdatesPackages": true,
             "updateFrequency": UpdateFrequency.hourly.rawValue,
+            "minimumPackageAge": MinimumPackageAge.oneDay.rawValue,
             "runsCleanupAfterUpdates": false,
             "sendsNotifications": true
         ])
@@ -124,6 +144,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         terminalItem.image = MenuIcon.terminal
         terminalItem.isHidden = true
         terminalItem.isEnabled = false
+        ageGuardItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        ageGuardItem.image = MenuIcon.security
+        ageGuardItem.isHidden = true
+        ageGuardItem.isEnabled = false
         settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         settingsItem.image = MenuIcon.settings
@@ -162,6 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.addItem(packageItem)
+        menu.addItem(ageGuardItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(refreshItem)
         menu.addItem(specificUpdateItem)
@@ -372,9 +397,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshSettingsControls()
     }
 
+    @objc private func settingsMinimumPackageAgeChanged(_ sender: NSPopUpButton) {
+        guard let rawValue = sender.selectedItem?.representedObject as? String,
+              let minimumAge = MinimumPackageAge(rawValue: rawValue) else { return }
+        minimumPackageAge = minimumAge
+        refreshSettingsControls()
+        if automaticallyUpdatesPackages, !isUpdating {
+            checkForOutdatedPackages()
+        }
+    }
+
     private func makeSettingsWindow() -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 580),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -409,6 +444,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             frequencyRow.addArrangedSubview(settingsFrequencyPopUp)
         }
 
+        let securitySection = sectionTitle("Security")
+        let minimumAgeRow = NSStackView()
+        minimumAgeRow.orientation = .horizontal
+        minimumAgeRow.alignment = .centerY
+        minimumAgeRow.spacing = 12
+        let minimumAgeLabel = label("Minimum package age")
+        settingsMinimumPackageAgePopUp = NSPopUpButton()
+        settingsMinimumPackageAgePopUp?.target = self
+        settingsMinimumPackageAgePopUp?.action = #selector(settingsMinimumPackageAgeChanged(_:))
+        minimumAgeRow.addArrangedSubview(minimumAgeLabel)
+        if let settingsMinimumPackageAgePopUp {
+            settingsMinimumPackageAgePopUp.widthAnchor.constraint(equalToConstant: 180).isActive = true
+            minimumAgeRow.addArrangedSubview(settingsMinimumPackageAgePopUp)
+        }
+        let minimumAgeHelp = mutedLabel("Auto-update waits until an update has been observed this long. Manual updates still run immediately.")
+        minimumAgeHelp.lineBreakMode = .byWordWrapping
+        minimumAgeHelp.maximumNumberOfLines = 2
+        minimumAgeHelp.widthAnchor.constraint(equalToConstant: 412).isActive = true
+
         let behaviorSection = sectionTitle("Behavior")
         settingsCleanupButton = checkbox(title: "Run brew cleanup after successful updates", action: #selector(settingsToggleCleanupAfterUpdates))
         settingsNotificationsButton = checkbox(title: "Notify when updates finish or need attention", action: #selector(settingsToggleNotifications))
@@ -419,6 +473,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsAutoUpdateButton,
             settingsLaunchAtLoginButton,
             frequencyRow,
+            separator(),
+            securitySection,
+            minimumAgeRow,
+            minimumAgeHelp,
             separator(),
             behaviorSection,
             settingsCleanupButton,
@@ -451,6 +509,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsFrequencyPopUp?.lastItem?.representedObject = frequency.rawValue
         }
         settingsFrequencyPopUp?.selectItem(withTitle: updateFrequency.title)
+
+        settingsMinimumPackageAgePopUp?.removeAllItems()
+        for minimumAge in MinimumPackageAge.allCases {
+            settingsMinimumPackageAgePopUp?.addItem(withTitle: minimumAge.title)
+            settingsMinimumPackageAgePopUp?.lastItem?.representedObject = minimumAge.rawValue
+        }
+        settingsMinimumPackageAgePopUp?.selectItem(withTitle: minimumPackageAge.title)
 
     }
 
@@ -497,6 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.lastCheckedAt = Date()
                     self.updateStatusMenuItems()
                     self.lastOutdatedPackages = packages
+                    self.recordObservedOutdatedPackages(packages)
                     if packages.isEmpty {
                         self.render(.current)
                         if self.celebrateAfterNextCurrentCheck {
@@ -506,7 +572,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     } else {
                         self.celebrateAfterNextCurrentCheck = false
                         if self.shouldAutoUpdateNow {
-                            self.beginUpdate(packages: packages, showsPackageNames: false, startedAutomatically: true)
+                            let automaticPackages = self.packagesEligibleForAutomaticUpdate(packages)
+                            if automaticPackages.isEmpty {
+                                self.render(.outdated(packages))
+                            } else {
+                                self.beginUpdate(packages: automaticPackages, showsPackageNames: false, startedAutomatically: true)
+                            }
                         } else {
                             self.render(.outdated(packages))
                         }
@@ -543,6 +614,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         historyItem.submenu = historySubmenu()
 
         notify(title: "Homebew update complete", body: "\(modeText) \(packageText).")
+    }
+
+    private func recordObservedOutdatedPackages(_ packages: [BrewPackage]) {
+        var firstSeen = observedOutdatedPackageFirstSeen
+        let currentKeys = Set(packages.map(\.observationKey))
+        let now = Date().timeIntervalSinceReferenceDate
+
+        for key in currentKeys where firstSeen[key] == nil {
+            firstSeen[key] = now
+        }
+
+        observedOutdatedPackageFirstSeen = firstSeen.filter { currentKeys.contains($0.key) }
+    }
+
+    private func packagesEligibleForAutomaticUpdate(_ packages: [BrewPackage]) -> [BrewPackage] {
+        guard let minimumAgeInterval = minimumPackageAge.interval else {
+            return packages
+        }
+
+        let firstSeen = observedOutdatedPackageFirstSeen
+        let now = Date().timeIntervalSinceReferenceDate
+
+        return packages.filter { package in
+            guard let firstSeenAt = firstSeen[package.observationKey] else {
+                return false
+            }
+
+            return now - firstSeenAt >= minimumAgeInterval
+        }
+    }
+
+    private func delayedPackageCount(in packages: [BrewPackage]) -> Int {
+        guard minimumPackageAge.interval != nil else {
+            return 0
+        }
+
+        return max(0, packages.count - packagesEligibleForAutomaticUpdate(packages).count)
     }
 
     private func updateStatusMenuItems() {
@@ -602,6 +710,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.button?.image = BeerIcon.image(fillLevel: 0.55)
             statusItem.button?.toolTip = "Checking Homebrew packages"
             packageItem.title = "Checking Homebrew..."
+            ageGuardItem.isHidden = true
             refreshItem.isEnabled = false
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
@@ -615,6 +724,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.button?.image = BeerIcon.image(fillLevel: 0.9)
             statusItem.button?.toolTip = "Homebrew packages are up to date"
             packageItem.title = "All packages are up to date"
+            ageGuardItem.isHidden = true
             refreshItem.isEnabled = true
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
@@ -628,6 +738,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.button?.image = BeerIcon.image(fillLevel: 0.08)
             statusItem.button?.toolTip = "\(packages.count) Homebrew package\(packages.count == 1 ? "" : "s") need updating"
             packageItem.title = packageSummary(packages)
+            updateAgeGuardItem(for: packages)
             refreshItem.isEnabled = true
             refreshItem.title = packages.count == 1 ? "Update Package" : "Update All Packages"
             refreshItem.image = MenuIcon.refresh
@@ -642,6 +753,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.button?.image = BeerIcon.image(fillLevel: CGFloat(progress.percent) / 100.0)
             statusItem.button?.toolTip = "Updating Homebrew packages: \(progress.percent)%"
             packageItem.title = "\(progress.percent)% - \(progress.message)"
+            ageGuardItem.isHidden = true
             refreshItem.isEnabled = false
             refreshItem.title = "Updating \(progress.percent)%"
             refreshItem.image = MenuIcon.updating
@@ -655,6 +767,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.button?.image = BeerIcon.image(fillLevel: 0.08)
             statusItem.button?.toolTip = "Homebrew update failed"
             packageItem.title = "Error: \(message)"
+            ageGuardItem.isHidden = true
             refreshItem.isEnabled = true
             refreshItem.title = "Try Again"
             refreshItem.image = MenuIcon.refresh
@@ -669,6 +782,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.button?.image = BeerIcon.image(fillLevel: 0.08)
             statusItem.button?.toolTip = "Homebrew needs your password in Terminal"
             packageItem.title = "Password required in Terminal"
+            updateAgeGuardItem(for: lastOutdatedPackages)
             refreshItem.isEnabled = true
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
@@ -683,6 +797,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.button?.image = BeerIcon.image(fillLevel: 0.08)
             statusItem.button?.toolTip = "Homebrew update was stopped"
             packageItem.title = "Update stopped"
+            updateAgeGuardItem(for: lastOutdatedPackages)
             refreshItem.isEnabled = true
             refreshItem.title = "Try Again"
             refreshItem.image = MenuIcon.refresh
@@ -697,6 +812,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.button?.image = BeerIcon.image(fillLevel: 0.08)
             statusItem.button?.toolTip = "Homebrew was not found"
             packageItem.title = "Homebrew was not found"
+            ageGuardItem.isHidden = true
             refreshItem.isEnabled = false
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
@@ -707,6 +823,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             terminalItem.isHidden = true
             terminalItem.isEnabled = false
         }
+    }
+
+    private func updateAgeGuardItem(for packages: [BrewPackage]) {
+        let delayedCount = delayedPackageCount(in: packages)
+        guard automaticallyUpdatesPackages, delayedCount > 0 else {
+            ageGuardItem.isHidden = true
+            return
+        }
+
+        ageGuardItem.title = minimumPackageAge.protectionTitle(forDelayedPackageCount: delayedCount)
+        ageGuardItem.isHidden = false
+        ageGuardItem.isEnabled = false
     }
 
     private func packageSummary(_ packages: [BrewPackage]) -> String {
@@ -860,6 +988,54 @@ private enum UpdateFrequency: String, CaseIterable {
     }
 }
 
+private enum MinimumPackageAge: String, CaseIterable {
+    case none
+    case oneDay
+    case threeDays
+    case sevenDays
+
+    var title: String {
+        switch self {
+        case .none:
+            return "No Delay"
+        case .oneDay:
+            return "1 Day"
+        case .threeDays:
+            return "3 Days"
+        case .sevenDays:
+            return "7 Days"
+        }
+    }
+
+    var interval: TimeInterval? {
+        switch self {
+        case .none:
+            return nil
+        case .oneDay:
+            return 24 * 60 * 60
+        case .threeDays:
+            return 3 * 24 * 60 * 60
+        case .sevenDays:
+            return 7 * 24 * 60 * 60
+        }
+    }
+
+    func protectionTitle(forDelayedPackageCount count: Int) -> String {
+        let packageText = count == 1 ? "1 package" : "\(count) packages"
+
+        switch self {
+        case .none:
+            return ""
+        case .oneDay:
+            return "Safety delay: \(packageText) waiting 1 day"
+        case .threeDays:
+            return "Safety delay: \(packageText) waiting 3 days"
+        case .sevenDays:
+            return "Safety delay: \(packageText) waiting 7 days"
+        }
+    }
+}
+
 private struct BrewPackage {
     enum Kind {
         case formula
@@ -879,6 +1055,15 @@ private struct BrewPackage {
     let name: String
     let installedVersions: [String]
     let currentVersion: String?
+
+    var observationKey: String {
+        [
+            kind.storageKey,
+            name,
+            installedVersions.joined(separator: ","),
+            currentVersion ?? ""
+        ].joined(separator: "|")
+    }
 
     var upgradeArguments: [String] {
         switch kind {
@@ -904,6 +1089,17 @@ private struct BrewPackage {
 
         let installed = installedVersions.first ?? "installed"
         return "\(installed) -> \(currentVersion)"
+    }
+}
+
+private extension BrewPackage.Kind {
+    var storageKey: String {
+        switch self {
+        case .formula:
+            return "formula"
+        case .cask:
+            return "cask"
+        }
     }
 }
 
@@ -1331,6 +1527,7 @@ private enum MenuIcon {
     static let updated = symbol("checkmark.seal")
     static let history = symbol("clock")
     static let appUpdate = symbol("arrow.down.circle")
+    static let security = symbol("shield")
 
     private static func symbol(_ name: String) -> NSImage? {
         let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
