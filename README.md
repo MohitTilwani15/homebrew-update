@@ -116,7 +116,22 @@ The free launch path does not require the Mac App Store or an Apple Developer Pr
 - Direct zip installs are manual updates from GitHub Releases.
 - A DMG can still be built for private/manual distribution.
 
-Free builds are ad-hoc signed, but not Developer ID signed or notarized. Gatekeeper can still warn on first launch; users may need to right-click the app and choose **Open**.
+Free builds are ad-hoc signed, but not Developer ID signed or notarized. Gatekeeper can still warn on first launch with:
+
+```text
+Apple could not verify "Homebew Menubar" is free of malware that may harm your Mac or compromise your privacy.
+```
+
+To open the free build:
+
+1. Try to open the app once.
+2. Open **System Settings**.
+3. Go to **Privacy & Security**.
+4. Scroll down to **Security**.
+5. Click **Open Anyway** for **Homebew Menubar**.
+6. Confirm by clicking **Open**.
+
+Removing this warning for everyone requires paid Developer ID signing and Apple notarization.
 
 ## Free Release
 
