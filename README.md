@@ -140,6 +140,26 @@ gh release create v0.1.0 \
   --notes "Unsigned macOS build. If Gatekeeper blocks first launch, right-click the app and choose Open."
 ```
 
+## GitHub Actions
+
+The repo has two workflows:
+
+- **CI** runs on pushes to `main`, pull requests, and manual dispatch. It builds the Swift package, builds the app bundle, validates the plist, creates the unsigned zip, and uploads that zip as a workflow artifact.
+- **Free Release** runs when a `v*` tag is pushed, or manually from GitHub Actions. It builds the unsigned zip, computes the SHA256, creates or updates the GitHub Release, uploads the zip, and prints the Homebrew cask values in the workflow summary.
+
+Normal pushes do not publish releases. To ship a new version:
+
+```bash
+# 1. Update MARKETING_VERSION and BUILD_NUMBER in version.env.
+# 2. Commit and push the change.
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+The tag must match `MARKETING_VERSION` in `version.env`.
+
+Updating a separate Homebrew tap repo is not automatic yet because GitHub's default token cannot push to another repository. The release workflow prints the `version` and `sha256` values to copy into the tap. Full tap automation can be added later with a dedicated `TAP_GITHUB_TOKEN` secret.
+
 ## Optional Paid Release Path
 
 Developer ID signing, notarization, and seamless Sparkle updates require the Apple Developer Program.

@@ -1,0 +1,100 @@
+name: Free Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish unsigned GitHub release
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          source version.env
+          echo "marketing_version=$MARKETING_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$MARKETING_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Validate tag matches version
+        if: github.event_name == 'push'
+        run: |
+          expected="${{ steps.version.outputs.tag }}"
+          actual="${GITHUB_REF_NAME}"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "Tag $actual does not match version.env tag $expected." >&2
+            exit 1
+          fi
+
+      - name: Validate shell scripts
+        run: |
+          bash -n scripts/build_app.sh
+          bash -n scripts/package_release_zip.sh
+          bash -n scripts/release_free.sh
+
+      - name: Build unsigned release zip
+        run: ./scripts/release_free.sh
+
+      - name: Compute SHA256
+        id: checksum
+        run: |
+          version="${{ steps.version.outputs.marketing_version }}"
+          zip_path="dist/Homebew-Menubar-$version.zip"
+          sha256="$(shasum -a 256 "$zip_path" | awk '{print $1}')"
+          echo "zip_path=$zip_path" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Write release notes
+        run: |
+          version="${{ steps.version.outputs.marketing_version }}"
+          sha256="${{ steps.checksum.outputs.sha256 }}"
+          cat > release-notes.md <<EOF
+          Unsigned macOS build.
+
+          If Gatekeeper blocks first launch, right-click the app and choose Open.
+
+          Homebrew cask values:
+
+          \`\`\`ruby
+          version "$version"
+          sha256 "$sha256"
+          \`\`\`
+          EOF
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          version="${{ steps.version.outputs.marketing_version }}"
+          zip_path="${{ steps.checksum.outputs.zip_path }}"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$zip_path" --clobber
+            gh release edit "$tag" \
+              --title "Homebew Menubar $version" \
+              --notes-file release-notes.md
+          else
+            gh release create "$tag" "$zip_path" \
+              --title "Homebew Menubar $version" \
+              --notes-file release-notes.md
+          fi
+
+      - name: Add release summary
+        run: |
+          {
+            echo "## Free release published"
+            echo
+            echo "- Version: ${{ steps.version.outputs.marketing_version }}"
+            echo "- Asset: ${{ steps.checksum.outputs.zip_path }}"
+            echo "- SHA256: ${{ steps.checksum.outputs.sha256 }}"
+          } >> "$GITHUB_STEP_SUMMARY"

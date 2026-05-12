@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build unsigned app
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Validate shell scripts
+        run: |
+          bash -n scripts/build_app.sh
+          bash -n scripts/build_dmg.sh
+          bash -n scripts/package_release_zip.sh
+          bash -n scripts/release_free.sh
+          bash -n scripts/sign_and_notarize.sh
+          bash -n scripts/make_appcast.sh
+          bash -n scripts/release.sh
+
+      - name: Build Swift package
+        run: swift build -c release
+
+      - name: Build app bundle
+        run: ./scripts/build_app.sh
+
+      - name: Validate app bundle plist
+        run: plutil -lint "dist/Homebew Menubar.app/Contents/Info.plist"
+
+      - name: Build unsigned release zip
+        run: ./scripts/package_release_zip.sh
+
+      - name: Upload unsigned release zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Homebew-Menubar-unsigned-${{ github.sha }}
+          path: dist/Homebew-Menubar-*.zip
+          if-no-files-found: error
