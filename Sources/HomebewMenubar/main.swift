@@ -34,10 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cheersSoundItem: NSMenuItem!
     private var lastCheckedItem: NSMenuItem!
     private var historyItem: NSMenuItem!
-    private var appUpdateItem: NSMenuItem!
     private var checkTimer: Timer?
     private var cheersTimer: Timer?
     private var settingsWindow: NSWindow?
+    private var settingsAppVersionLabel: NSTextField?
+    private var settingsAppUpdateStatusLabel: NSTextField?
+    private var settingsAppUpdateButton: NSButton?
     private var settingsAutoUpdateButton: NSButton?
     private var settingsLaunchAtLoginButton: NSButton?
     private var settingsCleanupButton: NSButton?
@@ -56,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeUpdateStartedAutomatically = false
     private var terminalCommand: String?
     private var celebrateAfterNextCurrentCheck = false
+    private var appUpdateState: AppUpdateState = .upToDate
 #if ENABLE_SPARKLE
     private var updaterController: SPUStandardUpdaterController?
 #endif
@@ -151,10 +154,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         settingsItem.image = MenuIcon.settings
-        appUpdateItem = NSMenuItem(title: appUpdateTitle, action: #selector(checkForAppUpdates), keyEquivalent: "")
-        appUpdateItem.target = self
-        appUpdateItem.image = MenuIcon.appUpdate
-        appUpdateItem.isEnabled = appUpdateIsEnabled
         autoUpdateItem = NSMenuItem(title: "Auto Update in Background", action: #selector(toggleAutomaticUpdates), keyEquivalent: "")
         autoUpdateItem.target = self
         autoUpdateItem.image = MenuIcon.automaticUpdate
@@ -196,7 +195,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(lastCheckedItem)
         menu.addItem(historyItem)
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(appUpdateItem)
         menu.addItem(settingsItem)
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
@@ -357,14 +355,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshSettingsControls()
     }
 
-    @objc private func checkForAppUpdates() {
+    @objc private func settingsAppUpdateAction() {
         if isInstalledByHomebrew {
-            TerminalLauncher.open(command: "brew update && brew upgrade --cask homebew-menubar")
+            TerminalLauncher.open(command: "brew update && brew upgrade --cask homebew-menubar; open -a 'Homebew Menubar'")
+            NSApp.terminate(nil)
             return
         }
 
 #if ENABLE_SPARKLE
+        appUpdateState = .checking
+        refreshAppUpdateControls()
         updaterController?.checkForUpdates(nil)
+#else
+        appUpdateState = .unavailable("Install a signed release build to enable app updates.")
+        refreshSettingsControls()
 #endif
     }
 
@@ -409,7 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makeSettingsWindow() -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 580),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 660),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -426,6 +430,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stack.alignment = .leading
         stack.spacing = 14
         stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let appSection = sectionTitle("App")
+        settingsAppVersionLabel = mutedLabel("Version \(currentAppVersion)")
+        settingsAppUpdateStatusLabel = mutedLabel("")
+        settingsAppUpdateButton = pushButton(title: "Check for Updates", action: #selector(settingsAppUpdateAction))
+        settingsAppUpdateButton?.image = MenuIcon.appUpdate
+        settingsAppUpdateButton?.imagePosition = .imageLeading
+        let appUpdateRow = NSStackView()
+        appUpdateRow.orientation = .horizontal
+        appUpdateRow.alignment = .centerY
+        appUpdateRow.spacing = 12
+        if let settingsAppUpdateStatusLabel {
+            settingsAppUpdateStatusLabel.lineBreakMode = .byWordWrapping
+            settingsAppUpdateStatusLabel.maximumNumberOfLines = 2
+            settingsAppUpdateStatusLabel.widthAnchor.constraint(equalToConstant: 252).isActive = true
+            appUpdateRow.addArrangedSubview(settingsAppUpdateStatusLabel)
+        }
+        if let settingsAppUpdateButton {
+            settingsAppUpdateButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 148).isActive = true
+            appUpdateRow.addArrangedSubview(settingsAppUpdateButton)
+        }
 
         let automationSection = sectionTitle("Automation")
         settingsAutoUpdateButton = checkbox(title: "Auto update packages in the background", action: #selector(settingsToggleAutomaticUpdates))
@@ -469,6 +494,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsCheersSoundButton = checkbox(title: "Play cheers sound after successful updates", action: #selector(settingsToggleCheersSound))
 
         [
+            appSection,
+            settingsAppVersionLabel,
+            appUpdateRow,
+            separator(),
             automationSection,
             settingsAutoUpdateButton,
             settingsLaunchAtLoginButton,
@@ -502,6 +531,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsCleanupButton?.state = runsCleanupAfterUpdates ? .on : .off
         settingsNotificationsButton?.state = sendsNotifications ? .on : .off
         settingsCheersSoundButton?.state = playsCheersSound ? .on : .off
+        refreshAppUpdateControls()
 
         settingsFrequencyPopUp?.removeAllItems()
         for frequency in UpdateFrequency.allCases {
@@ -540,6 +570,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func checkbox(title: String, action: Selector) -> NSButton {
         NSButton(checkboxWithTitle: title, target: self, action: action)
+    }
+
+    private func pushButton(title: String, action: Selector) -> NSButton {
+        let button = NSButton(title: title, target: self, action: action)
+        button.bezelStyle = .rounded
+        return button
     }
 
     private func separator() -> NSBox {
@@ -907,41 +943,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupAppUpdater() {
-        appUpdateItem.title = appUpdateTitle
-        appUpdateItem.isEnabled = appUpdateIsEnabled
-
         guard !isInstalledByHomebrew else { return }
 #if ENABLE_SPARKLE
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
+            updaterDelegate: self,
             userDriverDelegate: nil
         )
+#else
+        appUpdateState = .unavailable("Install a signed release build to enable app updates.")
 #endif
     }
 
-    private var appUpdateTitle: String {
+    private func refreshAppUpdateControls() {
+        settingsAppVersionLabel?.stringValue = "Version \(currentAppVersion)"
+
         if isInstalledByHomebrew {
-            return "Update App with Homebrew"
+            settingsAppUpdateStatusLabel?.stringValue = "Installed with Homebrew. Updates are managed by brew."
+            settingsAppUpdateButton?.title = "Update & Relaunch"
+            settingsAppUpdateButton?.isEnabled = true
+            return
         }
 
-#if ENABLE_SPARKLE
-        return "Check for App Updates..."
-#else
-        return "App Updates Unavailable"
-#endif
+        switch appUpdateState {
+        case .upToDate:
+            settingsAppUpdateStatusLabel?.stringValue = "You're up to date."
+            settingsAppUpdateButton?.title = "Check Again"
+            settingsAppUpdateButton?.isEnabled = true
+        case .checking:
+            settingsAppUpdateStatusLabel?.stringValue = "Checking for app updates..."
+            settingsAppUpdateButton?.title = "Checking..."
+            settingsAppUpdateButton?.isEnabled = false
+        case .available(let version):
+            settingsAppUpdateStatusLabel?.stringValue = "Version \(version) is available."
+            settingsAppUpdateButton?.title = "Update & Relaunch"
+            settingsAppUpdateButton?.isEnabled = true
+        case .unavailable(let message):
+            settingsAppUpdateStatusLabel?.stringValue = message
+            settingsAppUpdateButton?.title = "Update"
+            settingsAppUpdateButton?.isEnabled = false
+        }
     }
 
-    private var appUpdateIsEnabled: Bool {
-        if isInstalledByHomebrew {
-            return true
+    private var currentAppVersion: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+
+        if let version, let build, !build.isEmpty, build != version {
+            return "\(version) (\(build))"
         }
 
-#if ENABLE_SPARKLE
-        return true
-#else
-        return false
-#endif
+        return version ?? "Unknown"
     }
 
     private var isInstalledByHomebrew: Bool {
@@ -949,6 +1001,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return bundlePath.contains("/Caskroom/homebew-menubar/")
     }
 }
+
+private enum AppUpdateState {
+    case upToDate
+    case checking
+    case available(String)
+    case unavailable(String)
+}
+
+#if ENABLE_SPARKLE
+extension AppDelegate: SPUUpdaterDelegate {
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        appUpdateState = .available(item.displayVersionString)
+        refreshSettingsControls()
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) {
+        appUpdateState = .upToDate
+        refreshSettingsControls()
+    }
+
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        appUpdateState = .unavailable(error.localizedDescription)
+        refreshSettingsControls()
+    }
+}
+#endif
 
 private struct UpdateProgress {
     let percent: Int

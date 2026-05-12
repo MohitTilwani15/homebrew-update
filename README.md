@@ -68,6 +68,7 @@ Open **Settings...** from the menu or press `Command + ,`.
 
 Settings include:
 
+- App version and app update status.
 - Auto update in background.
 - Launch at login.
 - Check frequency.
@@ -181,6 +182,11 @@ The helper below prints the CodexBar-style release steps after signing and appca
 
 Direct installs can use Sparkle for app updates.
 
+App update controls live in **Settings**, not in the menu bar menu. Settings shows the current app version, an update status, and one action button:
+
+- **Check Again** when the app is current.
+- **Update & Relaunch** when an app update is available.
+
 Release builds enable Sparkle by setting:
 
 ```bash
@@ -195,7 +201,7 @@ The build script writes these Sparkle keys into `Info.plist`:
 - `SUEnableAutomaticChecks`: enabled.
 - `SUAutomaticallyUpdate`: enabled.
 
-Homebrew Cask installs disable in-app Sparkle updates at runtime and show **Update App with Homebrew** instead.
+Homebrew Cask installs disable in-app Sparkle updates at runtime. Settings shows the current version and an **Update & Relaunch** button that updates through `brew`.
 
 ## Homebrew Cask
 
