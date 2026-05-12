@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="Homebew Menubar"
 APP_DIR="$ROOT_DIR/dist/$APP_NAME.app"
+ENTITLEMENTS="$ROOT_DIR/entitlements.plist"
 
 if [[ -f "$ROOT_DIR/version.env" ]]; then
   # shellcheck source=/dev/null
@@ -21,6 +22,11 @@ fi
 if [[ ! -d "$APP_DIR" ]]; then
   echo "Missing app bundle: $APP_DIR" >&2
   exit 1
+fi
+
+if [[ "${AD_HOC_SIGN:-1}" == "1" ]]; then
+  codesign --force --deep --sign - --entitlements "$ENTITLEMENTS" "$APP_DIR"
+  codesign --verify --deep --strict --verbose=2 "$APP_DIR"
 fi
 
 rm -f "$ZIP_PATH"

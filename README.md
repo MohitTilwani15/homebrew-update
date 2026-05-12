@@ -116,7 +116,7 @@ The free launch path does not require the Mac App Store or an Apple Developer Pr
 - Direct zip installs are manual updates from GitHub Releases.
 - A DMG can still be built for private/manual distribution.
 
-Unsigned builds can trigger Gatekeeper warnings. Users may need to right-click the app and choose **Open** the first time.
+Free builds are ad-hoc signed, but not Developer ID signed or notarized. Gatekeeper can still warn on first launch; users may need to right-click the app and choose **Open**.
 
 ## Free Release
 
@@ -131,6 +131,8 @@ The zip is written to:
 ```text
 dist/Homebew-Menubar-<version>.zip
 ```
+
+The free release zip is ad-hoc signed before packaging so macOS sees a valid app bundle signature even without a paid Developer ID certificate.
 
 Create the GitHub release:
 
