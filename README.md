@@ -54,7 +54,9 @@ The default delay is **1 day**. Available options are:
 
 This is based on when Homebew Menubar first sees that specific package/version as outdated, because Homebrew does not expose a reliable upstream release timestamp for every formula and cask in the regular outdated check.
 
-Manual updates are still immediate. If you click **Update All Packages** or choose a specific package, the app treats that as an explicit override.
+**Refresh** only checks again and still respects the minimum package age for any automatic update that follows.
+
+Manual updates are still immediate. If you click **Update Now** or choose a specific package, the app treats that as an explicit override.
 
 ## Password-Required Casks
 
@@ -351,7 +353,7 @@ Repo: https://github.com/MohitTilwani15/homebrew-update
 Screenshot checklist:
 
 - Menu bar with empty beer icon and outdated package count.
-- Open menu showing `Update All Packages` and `Update One Package`.
+- Open menu showing `Update Now` and `Update One Package`.
 - Settings window with auto-update and frequency controls.
 - Updating state with percentage.
 - Full beer icon after success.

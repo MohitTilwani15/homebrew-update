@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var packageItem: NSMenuItem!
     private var refreshItem: NSMenuItem!
+    private var updateNowItem: NSMenuItem!
     private var specificUpdateItem: NSMenuItem!
     private var stopItem: NSMenuItem!
     private var terminalItem: NSMenuItem!
@@ -130,9 +131,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.toolTip = "Homebew Menubar"
 
         packageItem = NSMenuItem(title: "Checking Homebrew...", action: nil, keyEquivalent: "")
-        refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshAndUpgrade), keyEquivalent: "r")
+        refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshPackages), keyEquivalent: "r")
         refreshItem.target = self
         refreshItem.image = MenuIcon.refresh
+        updateNowItem = NSMenuItem(title: "Update Now", action: #selector(updateNow), keyEquivalent: "u")
+        updateNowItem.target = self
+        updateNowItem.image = MenuIcon.packageUpdate
+        updateNowItem.isHidden = true
+        updateNowItem.isEnabled = false
         specificUpdateItem = NSMenuItem(title: "Update One Package", action: nil, keyEquivalent: "")
         specificUpdateItem.image = MenuIcon.packageList
         specificUpdateItem.isHidden = true
@@ -188,6 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(ageGuardItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(refreshItem)
+        menu.addItem(updateNowItem)
         menu.addItem(specificUpdateItem)
         menu.addItem(stopItem)
         menu.addItem(terminalItem)
@@ -228,8 +235,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         activeOperation?.cancel()
     }
 
-    @objc private func refreshAndUpgrade() {
+    @objc private func refreshPackages() {
         guard !isUpdating else { return }
+        checkForOutdatedPackages()
+    }
+
+    @objc private func updateNow() {
+        guard !isUpdating, !lastOutdatedPackages.isEmpty else { return }
         beginUpdate(packages: lastOutdatedPackages, showsPackageNames: false)
     }
 
@@ -751,6 +763,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = false
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
+            updateNowItem.isHidden = true
+            updateNowItem.isEnabled = false
             specificUpdateItem.isHidden = true
             specificUpdateItem.isEnabled = false
             stopItem.isHidden = true
@@ -765,6 +779,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = true
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
+            updateNowItem.isHidden = true
+            updateNowItem.isEnabled = false
             specificUpdateItem.isHidden = true
             specificUpdateItem.isEnabled = false
             stopItem.isHidden = true
@@ -777,8 +793,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             packageItem.title = packageSummary(packages)
             updateAgeGuardItem(for: packages)
             refreshItem.isEnabled = true
-            refreshItem.title = packages.count == 1 ? "Update Package" : "Update All Packages"
+            refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
+            updateNowItem.isHidden = packages.isEmpty
+            updateNowItem.isEnabled = !packages.isEmpty
+            updateNowItem.title = "Update Now"
             specificUpdateItem.isHidden = packages.isEmpty
             specificUpdateItem.isEnabled = !packages.isEmpty
             specificUpdateItem.submenu = packageSubmenu(for: packages)
@@ -794,6 +813,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = false
             refreshItem.title = "Updating \(progress.percent)%"
             refreshItem.image = MenuIcon.updating
+            updateNowItem.isHidden = true
+            updateNowItem.isEnabled = false
             specificUpdateItem.isHidden = true
             specificUpdateItem.isEnabled = false
             stopItem.isHidden = false
@@ -808,6 +829,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = true
             refreshItem.title = "Try Again"
             refreshItem.image = MenuIcon.refresh
+            updateNowItem.isHidden = true
+            updateNowItem.isEnabled = false
             specificUpdateItem.isHidden = true
             specificUpdateItem.isEnabled = false
             stopItem.isHidden = true
@@ -823,6 +846,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = true
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
+            updateNowItem.isHidden = true
+            updateNowItem.isEnabled = false
             specificUpdateItem.isHidden = lastOutdatedPackages.isEmpty
             specificUpdateItem.isEnabled = !lastOutdatedPackages.isEmpty
             specificUpdateItem.submenu = packageSubmenu(for: lastOutdatedPackages)
@@ -836,8 +861,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             packageItem.title = "Update stopped"
             updateAgeGuardItem(for: lastOutdatedPackages)
             refreshItem.isEnabled = true
-            refreshItem.title = "Try Again"
+            refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
+            updateNowItem.isHidden = lastOutdatedPackages.isEmpty
+            updateNowItem.isEnabled = !lastOutdatedPackages.isEmpty
+            updateNowItem.title = "Update Now"
             specificUpdateItem.isHidden = lastOutdatedPackages.isEmpty
             specificUpdateItem.isEnabled = !lastOutdatedPackages.isEmpty
             specificUpdateItem.submenu = packageSubmenu(for: lastOutdatedPackages)
@@ -853,6 +881,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.isEnabled = false
             refreshItem.title = "Refresh"
             refreshItem.image = MenuIcon.refresh
+            updateNowItem.isHidden = true
+            updateNowItem.isEnabled = false
             specificUpdateItem.isHidden = true
             specificUpdateItem.isEnabled = false
             stopItem.isHidden = true
@@ -1596,6 +1626,7 @@ private enum MenuIcon {
     static let refresh = symbol("arrow.clockwise")
     static let settings = symbol("gearshape")
     static let updating = symbol("arrow.triangle.2.circlepath")
+    static let packageUpdate = symbol("arrow.down.circle")
     static let packageList = symbol("list.bullet")
     static let formula = symbol("terminal")
     static let cask = symbol("app")
