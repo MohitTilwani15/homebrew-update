@@ -367,8 +367,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshAppUpdateControls()
         updaterController?.checkForUpdates(nil)
 #else
-        appUpdateState = .unavailable("Install a signed release build to enable app updates.")
-        refreshSettingsControls()
+        if let releasesURL = URL(string: "https://github.com/MohitTilwani15/homebrew-update/releases") {
+            NSWorkspace.shared.open(releasesURL)
+        }
 #endif
     }
 
@@ -951,7 +952,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             userDriverDelegate: nil
         )
 #else
-        appUpdateState = .unavailable("Install a signed release build to enable app updates.")
+        appUpdateState = .manualDownloads("App updates are manual for unsigned builds.")
 #endif
     }
 
@@ -977,6 +978,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .available(let version):
             settingsAppUpdateStatusLabel?.stringValue = "Version \(version) is available."
             settingsAppUpdateButton?.title = "Update & Relaunch"
+            settingsAppUpdateButton?.isEnabled = true
+        case .manualDownloads(let message):
+            settingsAppUpdateStatusLabel?.stringValue = message
+            settingsAppUpdateButton?.title = "Open Releases"
             settingsAppUpdateButton?.isEnabled = true
         case .unavailable(let message):
             settingsAppUpdateStatusLabel?.stringValue = message
@@ -1006,6 +1011,7 @@ private enum AppUpdateState {
     case upToDate
     case checking
     case available(String)
+    case manualDownloads(String)
     case unavailable(String)
 }
 

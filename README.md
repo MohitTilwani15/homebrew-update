@@ -21,7 +21,7 @@ Homebew Menubar sits in the menu bar, checks Homebrew for outdated formulae and 
 - Optional macOS notifications.
 - Quick cheers animation and success sound when everything is caught up.
 - Update history.
-- CodexBar-style distribution: GitHub release zip, Sparkle app updates, and Homebrew Cask support.
+- Free distribution: unsigned GitHub release zip and Homebrew Cask support.
 
 ## How It Works
 
@@ -105,21 +105,23 @@ swift run HomebewMenubar
 
 Build the app, then move `dist/Homebew Menubar.app` into `/Applications` or `~/Applications`.
 
-## Distribution Model
+## Free Distribution Model
 
-Homebew Menubar follows the same distribution model as CodexBar:
+The free launch path does not require the Mac App Store or an Apple Developer Program membership:
 
-- GitHub Releases host a signed and notarized zip: `Homebew-Menubar-<version>.zip`.
-- Direct installs use Sparkle to check for app updates from `appcast.xml`.
+- GitHub Releases host an unsigned zip: `Homebew-Menubar-<version>.zip`.
 - Homebrew installs use a Cask and update through `brew`.
-- A DMG can still be built for private testing, but the primary public artifact is the release zip.
+- Direct zip installs are manual updates from GitHub Releases.
+- A DMG can still be built for private/manual distribution.
 
-## GitHub Release Zip
+Unsigned builds can trigger Gatekeeper warnings. Users may need to right-click the app and choose **Open** the first time.
 
-For local unsigned zip packaging:
+## Free Release
+
+Build the unsigned release zip and print the cask SHA:
 
 ```bash
-./scripts/package_release_zip.sh
+./scripts/release_free.sh
 ```
 
 The zip is written to:
@@ -128,23 +130,21 @@ The zip is written to:
 dist/Homebew-Menubar-<version>.zip
 ```
 
-That local zip is not signed or notarized unless it was produced by the release signing script.
-
-## Public Distribution Without the Mac App Store
-
-Yes, this app can be distributed outside the Mac App Store. The public-friendly path is:
-
-1. Join the Apple Developer Program.
-2. Create a `Developer ID Application` certificate.
-3. Generate a Sparkle EdDSA keypair with Sparkle's `generate_keys` tool.
-4. Put the public key in `SPARKLE_PUBLIC_ED_KEY`.
-5. Store notarization credentials once:
+Create the GitHub release:
 
 ```bash
-xcrun notarytool store-credentials "homebew-menubar-notary"
+git tag v0.1.0
+gh release create v0.1.0 \
+  dist/Homebew-Menubar-0.1.0.zip \
+  --title "Homebew Menubar 0.1.0" \
+  --notes "Unsigned macOS build. If Gatekeeper blocks first launch, right-click the app and choose Open."
 ```
 
-6. Build, sign, notarize, staple, and zip:
+## Optional Paid Release Path
+
+Developer ID signing, notarization, and seamless Sparkle updates require the Apple Developer Program.
+
+The optional paid path is still in the repo for later:
 
 ```bash
 CODE_SIGN_IDENTITY="Developer ID Application: Your Name (TEAM_ID)" \
@@ -153,7 +153,7 @@ SPARKLE_PUBLIC_ED_KEY="YOUR_SPARKLE_PUBLIC_ED_KEY" \
 ./scripts/sign_and_notarize.sh
 ```
 
-7. Generate the Sparkle appcast:
+Then generate the Sparkle appcast:
 
 ```bash
 SPARKLE_PRIVATE_KEY_FILE="/path/to/sparkle-private-key" \
@@ -161,31 +161,19 @@ GENERATE_APPCAST="/path/to/Sparkle/bin/generate_appcast" \
 ./scripts/make_appcast.sh
 ```
 
-8. Commit the updated `appcast.xml`.
-9. Create a GitHub release and upload:
+## App Updates
 
-```bash
-git tag v0.1.0
-gh release create v0.1.0 \
-  dist/Homebew-Menubar-0.1.0.zip \
-  appcast.xml \
-  --title "Homebew Menubar 0.1.0"
-```
+Free direct installs are updated manually from GitHub Releases. Settings shows the current app version and an **Open Releases** button.
 
-The helper below prints the CodexBar-style release steps after signing and appcast generation:
+Homebrew Cask installs update through `brew`. Settings shows the current app version and an **Update & Relaunch** button that runs the brew update flow.
 
-```bash
-./scripts/release.sh
-```
-
-## Sparkle Updates
-
-Direct installs can use Sparkle for app updates.
+Sparkle remains optional for future signed releases.
 
 App update controls live in **Settings**, not in the menu bar menu. Settings shows the current app version, an update status, and one action button:
 
-- **Check Again** when the app is current.
-- **Update & Relaunch** when an app update is available.
+- **Open Releases** for unsigned direct installs.
+- **Update & Relaunch** for Homebrew installs.
+- **Check Again** or **Update & Relaunch** for future Sparkle-enabled signed builds.
 
 Release builds enable Sparkle by setting:
 
@@ -201,7 +189,7 @@ The build script writes these Sparkle keys into `Info.plist`:
 - `SUEnableAutomaticChecks`: enabled.
 - `SUAutomaticallyUpdate`: enabled.
 
-Homebrew Cask installs disable in-app Sparkle updates at runtime. Settings shows the current version and an **Update & Relaunch** button that updates through `brew`.
+Homebrew Cask installs disable in-app Sparkle updates at runtime.
 
 ## Homebrew Cask
 
@@ -253,7 +241,7 @@ The DMG is written to:
 dist/Homebew-Menubar.dmg
 ```
 
-For the CodexBar-style public flow, prefer the signed/notarized zip plus Homebrew Cask.
+For the free public flow, prefer the unsigned zip plus Homebrew Cask.
 
 ### Entitlements
 
@@ -309,14 +297,11 @@ Update flow:
 - Confirm Terminal handoff works for password-required casks.
 - Update `version.env`.
 - Finalize release notes.
-- Generate or confirm `SPARKLE_PUBLIC_ED_KEY`.
-- Build, sign, notarize, staple, and zip with `./scripts/sign_and_notarize.sh`.
-- Generate `appcast.xml` with `./scripts/make_appcast.sh`.
-- Commit `appcast.xml`.
+- Build the unsigned release zip with `./scripts/release_free.sh`.
 - Tag the release.
-- Upload the zip and appcast to GitHub Releases.
+- Upload the zip to GitHub Releases.
 - Update and test the Homebrew tap cask.
-- Confirm direct install can check Sparkle updates.
+- Confirm direct install opens GitHub Releases from Settings.
 - Confirm Homebrew install updates via `brew`.
 
 ## Launch Post Notes
