@@ -4,6 +4,11 @@ A native macOS menu bar app for keeping Homebrew packages up to date.
 
 Homebew Menubar sits in the menu bar, checks Homebrew for outdated formulae and casks, and can update everything automatically in the background. The icon is a beer glass: full when everything is current, empty when updates are waiting, and partially filled while checks or updates are running.
 
+> [!IMPORTANT]
+> This project was built with AI assistance and is tested on my own Homebrew setup before release.
+>
+> Free builds are distributed outside the Mac App Store and are not Apple-notarized, so macOS may show a Gatekeeper warning on first launch. Review the source and release notes before installing if that matters for your security model.
+
 ## Features
 
 - Native macOS menu bar app built with Swift and AppKit.
