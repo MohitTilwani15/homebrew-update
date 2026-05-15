@@ -1169,6 +1169,7 @@ private struct BrewPackage {
     let name: String
     let installedVersions: [String]
     let currentVersion: String?
+    let upgradeName: String?
 
     var observationKey: String {
         [
@@ -1179,13 +1180,27 @@ private struct BrewPackage {
         ].joined(separator: "|")
     }
 
+    var upgradeIdentifier: String {
+        upgradeName ?? name
+    }
+
     var upgradeArguments: [String] {
         switch kind {
         case .formula:
             return ["upgrade", "--formula", name]
         case .cask:
-            return ["upgrade", "--cask", name]
+            return ["upgrade", "--cask", "--greedy", upgradeIdentifier]
         }
+    }
+
+    func withUpgradeName(_ upgradeName: String?) -> BrewPackage {
+        BrewPackage(
+            kind: kind,
+            name: name,
+            installedVersions: installedVersions,
+            currentVersion: currentVersion,
+            upgradeName: upgradeName
+        )
     }
 
     var menuTitle: String {
@@ -1242,7 +1257,8 @@ private struct BrewOutdatedSnapshot: Decodable {
                     kind: .formula,
                     name: $0.name,
                     installedVersions: $0.installed_versions ?? [],
-                    currentVersion: $0.current_version
+                    currentVersion: $0.current_version,
+                    upgradeName: nil
                 )
             }
         let caskPackages = casks.map {
@@ -1250,12 +1266,24 @@ private struct BrewOutdatedSnapshot: Decodable {
                 kind: .cask,
                 name: $0.name,
                 installedVersions: $0.installed_versions ?? [],
-                currentVersion: $0.current_version
+                currentVersion: $0.current_version,
+                upgradeName: nil
             )
         }
 
         return formulaPackages + caskPackages
     }
+}
+
+private struct BrewCaskInfoSnapshot: Decodable {
+    struct Cask: Decodable {
+        let token: String?
+        let full_token: String?
+        let version: String?
+        let outdated: Bool?
+    }
+
+    let casks: [Cask]
 }
 
 private enum BrewError: LocalizedError, Equatable {
@@ -1434,7 +1462,102 @@ private final class BrewPackageService {
             throw BrewError.invalidOutdatedJSON
         }
 
-        return snapshot.upgradeablePackages
+        return snapshot.upgradeablePackages.map {
+            packageByResolvingCaskUpgradeName($0, operation: operation)
+        }
+    }
+
+    fileprivate func packageByResolvingCaskUpgradeName(
+        _ package: BrewPackage,
+        operation: BrewUpdateOperation?,
+        forceSearch: Bool = false
+    ) -> BrewPackage {
+        guard package.kind == .cask else { return package }
+
+        if !forceSearch,
+           let info = caskInfo(for: package.name, operation: operation),
+           caskInfo(info, matches: package) {
+            return package.withUpgradeName(caskUpgradeName(from: info, fallback: package.name))
+        }
+
+        for candidate in caskSearchCandidates(named: package.name, operation: operation) {
+            guard let info = caskInfo(for: candidate, operation: operation),
+                  caskInfo(info, matches: package) else {
+                continue
+            }
+
+            return package.withUpgradeName(caskUpgradeName(from: info, fallback: candidate))
+        }
+
+        return package
+    }
+
+    fileprivate func caskUpgradeWasSkipped(_ output: String) -> Bool {
+        let normalizedOutput = output.lowercased()
+        return normalizedOutput.contains("not upgrading") &&
+            normalizedOutput.contains("latest version is already installed")
+    }
+
+    fileprivate func packageIsStillOutdated(_ package: BrewPackage, operation: BrewUpdateOperation?) -> Bool {
+        guard let packages = try? outdatedPackages(operation: operation) else {
+            return false
+        }
+
+        return packages.contains {
+            $0.kind == package.kind &&
+                $0.name == package.name &&
+                (package.currentVersion == nil || $0.currentVersion == package.currentVersion)
+        }
+    }
+
+    private func caskInfo(
+        for caskName: String,
+        operation: BrewUpdateOperation?
+    ) -> BrewCaskInfoSnapshot.Cask? {
+        guard let output = try? runBrew(["info", "--cask", caskName, "--json=v2"], operation: operation),
+              let data = jsonData(from: output),
+              let snapshot = try? JSONDecoder().decode(BrewCaskInfoSnapshot.self, from: data) else {
+            return nil
+        }
+
+        return snapshot.casks.first
+    }
+
+    private func caskInfo(
+        _ info: BrewCaskInfoSnapshot.Cask,
+        matches package: BrewPackage
+    ) -> Bool {
+        if let currentVersion = package.currentVersion,
+           !currentVersion.isEmpty,
+           info.version == currentVersion {
+            return true
+        }
+
+        return info.outdated == true
+    }
+
+    private func caskUpgradeName(
+        from info: BrewCaskInfoSnapshot.Cask,
+        fallback: String
+    ) -> String {
+        let name = info.full_token ?? info.token ?? fallback
+        return name.isEmpty ? fallback : name
+    }
+
+    private func caskSearchCandidates(
+        named caskName: String,
+        operation: BrewUpdateOperation?
+    ) -> [String] {
+        guard let output = try? runBrew(["search", "--cask", caskName], operation: operation) else {
+            return []
+        }
+
+        var seen: Set<String> = []
+        return output
+            .split { $0.isWhitespace || $0.isNewline }
+            .map(String.init)
+            .filter { $0 == caskName || $0.hasSuffix("/\(caskName)") }
+            .filter { seen.insert($0).inserted }
     }
 
     private func jsonData(from output: String) -> Data? {
@@ -1533,10 +1656,7 @@ private final class BrewUpdateOperation {
             for (index, package) in packages.enumerated() {
                 try throwIfCanceled()
                 report(percent: percent(completed: index), message: updateCountMessage(completed: index))
-                _ = try runner.runBrew(package.upgradeArguments, operation: self) { [weak self] _ in
-                    guard let self else { return }
-                    self.report(percent: self.percent(completed: index), message: self.updateCountMessage(completed: index))
-                }
+                try upgrade(package, at: index)
 
                 lock.lock()
                 completedPackages = index + 1
@@ -1587,6 +1707,45 @@ private final class BrewUpdateOperation {
         } else {
             report(percent: 12, message: "Updating Homebrew metadata")
         }
+    }
+
+    private func upgrade(_ package: BrewPackage, at index: Int) throws {
+        var output = ""
+        _ = try runner.runBrew(package.upgradeArguments, operation: self) { [weak self] chunk in
+            output += chunk
+            guard let self else { return }
+            self.report(percent: self.percent(completed: index), message: self.updateCountMessage(completed: index))
+        }
+
+        guard package.kind == .cask,
+              runner.caskUpgradeWasSkipped(output),
+              runner.packageIsStillOutdated(package, operation: self) else {
+            return
+        }
+
+        let resolvedPackage = runner.packageByResolvingCaskUpgradeName(
+            package,
+            operation: self,
+            forceSearch: true
+        )
+
+        if resolvedPackage.upgradeIdentifier != package.upgradeIdentifier {
+            var retryOutput = ""
+            _ = try runner.runBrew(resolvedPackage.upgradeArguments, operation: self) { [weak self] chunk in
+                retryOutput += chunk
+                guard let self else { return }
+                self.report(percent: self.percent(completed: index), message: self.updateCountMessage(completed: index))
+            }
+
+            if !runner.caskUpgradeWasSkipped(retryOutput) ||
+                !runner.packageIsStillOutdated(resolvedPackage, operation: self) {
+                return
+            }
+
+            output += retryOutput
+        }
+
+        throw BrewError.failed(command: package.upgradeArguments.joined(separator: " "), output: output)
     }
 
     private func packageProgressDenominator() -> Int {

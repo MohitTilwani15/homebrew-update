@@ -36,10 +36,12 @@ Updates run as explicit formula or cask upgrades:
 ```text
 brew update
 brew upgrade --formula ...
-brew upgrade --cask ...
+brew upgrade --cask --greedy ...
 ```
 
 After an update finishes, the app checks Homebrew again and returns the beer glass to full when no updates remain.
+
+For casks, Homebew Menubar resolves duplicate cask tokens across installed taps before upgrading. This handles cases where `brew outdated` reports a cask update, but the unqualified `brew upgrade --cask <name>` command would otherwise say the latest version is already installed.
 
 ## Minimum Package Age
 
@@ -318,7 +320,7 @@ Update flow:
 2. The app runs `brew outdated --json=v2`.
 3. If packages are outdated and auto-update is enabled, the update starts.
 4. The app runs `brew update`.
-5. Each package is upgraded with either `brew upgrade --formula <name>` or `brew upgrade --cask <name>`.
+5. Each package is upgraded with either `brew upgrade --formula <name>` or `brew upgrade --cask --greedy <name>`.
 6. If cleanup is enabled, the app runs `brew cleanup`.
 7. The app checks outdated packages again.
 8. If all packages are current, the beer icon returns to full.
